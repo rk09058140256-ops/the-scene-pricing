@@ -275,9 +275,12 @@
     });
   }
 
-  // 同じチャネルに複数行（プラン違い）が検出された場合、前回そのチャネルで
-  // 選んでいたプラン名（state.planMemory）と完全一致する行を自動でチェックする。
-  // 一致しない/記憶が無い場合はそのチャネルをチェックOFFのままにし、要確認として報告する。
+  // 同じチャネルに複数行（プラン違い）が検出された場合:
+  //   1. 前回そのチャネルで選んでいたプラン名（state.planMemory）と完全一致する行があればそれを選ぶ
+  //   2. 一致しない/記憶が無い場合は、そのチャネル内で最も安い実質価格（無ければ表示価格）の行を
+  //      自動で選ぶ（未追加のまま止めず、必ずどれか1行を選択する）
+  // どちらの経路で選ばれたかは呼び出し側に返し、フォールバックで選んだ分は
+  // ポップアップ上で「最安値を自動選択」として案内する（エラー扱いにはしない）。
   function buildInitialSelection(rows) {
     var groups = {};
     rows.forEach(function (data, idx) {
@@ -289,7 +292,7 @@
     var checked = rows.map(function () {
       return false;
     });
-    var ambiguousOtaIds = [];
+    var cheapestFallbackOtaIds = [];
 
     Object.keys(groups).forEach(function (otaId) {
       var indices = groups[otaId];
@@ -309,12 +312,25 @@
 
       if (matched.length === 1) {
         checked[matched[0]] = true;
-      } else {
-        ambiguousOtaIds.push(otaId);
+        return;
       }
+
+      var withPrice = indices.filter(function (i) {
+        return rows[i].finalPrice !== null || rows[i].displayPrice !== null;
+      });
+      if (!withPrice.length) return; // 価格が取れている行が1つも無い場合のみスキップ
+
+      var cheapestIdx = withPrice.reduce(function (best, i) {
+        var priceI = rows[i].finalPrice !== null ? rows[i].finalPrice : rows[i].displayPrice;
+        var priceBest = rows[best].finalPrice !== null ? rows[best].finalPrice : rows[best].displayPrice;
+        return priceI < priceBest ? i : best;
+      }, withPrice[0]);
+
+      checked[cheapestIdx] = true;
+      cheapestFallbackOtaIds.push(otaId);
     });
 
-    return { checked: checked, ambiguousOtaIds: ambiguousOtaIds };
+    return { checked: checked, cheapestFallbackOtaIds: cheapestFallbackOtaIds };
   }
 
   function rememberPlanSelection(dataRows) {
@@ -339,7 +355,7 @@
       els.metaBox.hidden = true;
       els.tableBox.hidden = true;
       els.addDayBox.hidden = true;
-      return { ambiguousOtaIds: [] };
+      return { cheapestFallbackOtaIds: [] };
     }
     state.meta = result.meta;
     var selection = buildInitialSelection(result.rows);
@@ -350,13 +366,13 @@
     renderTable();
     els.rawText.value = JSON.stringify(result, null, 2);
 
-    if (selection.ambiguousOtaIds.length) {
+    if (selection.cheapestFallbackOtaIds.length) {
       setStatus(
         state.rows.length +
-          "件を取得しました。複数プランが検出され自動選択できないチャネル: " +
-          selection.ambiguousOtaIds.join("、") +
-          "（テーブルで手動確認してください）",
-        "error"
+          "件を取得しました。複数プランが検出され最安値を自動選択したチャネル: " +
+          selection.cheapestFallbackOtaIds.join("、") +
+          "（違うプランを比較したい場合はテーブルでチェックし直してください）",
+        "ok"
       );
     } else {
       setStatus(state.rows.length + "件を取得しました。内容を確認して「月次リストに追加」してください。", "ok");
@@ -490,16 +506,26 @@
                 return;
               }
 
-              if (selection.ambiguousOtaIds.length) {
+              if (selection.cheapestFallbackOtaIds.length && staleWarning) {
                 setStatus(
                   addResult.dateIso +
-                    "：" +
-                    selection.ambiguousOtaIds.join("、") +
-                    " は複数プランのため自動選択できず未追加です（それ以外の" +
+                    " を追加しました（" +
                     addResult.count +
-                    "件は追加済み）。テーブルで手動確認の上、必要なら「月次リストに追加」を再度押してください。" +
+                    "件、うち最安値を自動選択: " +
+                    selection.cheapestFallbackOtaIds.join("、") +
+                    "）。" +
                     staleWarning,
                   "error"
+                );
+              } else if (selection.cheapestFallbackOtaIds.length) {
+                setStatus(
+                  addResult.dateIso +
+                    " を追加しました（" +
+                    addResult.count +
+                    "件、うち最安値を自動選択: " +
+                    selection.cheapestFallbackOtaIds.join("、") +
+                    "）。続けて押すと次の日に進みます。",
+                  "ok"
                 );
               } else if (staleWarning) {
                 setStatus(
