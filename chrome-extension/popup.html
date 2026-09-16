@@ -1,0 +1,131 @@
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8" />
+  <title>OTA価格比較エクスポーター</title>
+  <link rel="stylesheet" href="popup.css" />
+</head>
+<body>
+  <header>
+    <h1>OTA価格比較エクスポーター</h1>
+    <p class="sub">Google Hotelsの料金比較画面から価格を取得します</p>
+  </header>
+
+  <section id="statusBox" class="status"></section>
+
+  <section class="actions-top">
+    <button id="extractBtn" class="btn btn-primary">このページの価格を取得</button>
+  </section>
+
+  <section id="metaBox" class="meta" hidden>
+    <div class="meta-row">
+      <span class="meta-label">ホテル名</span>
+      <span id="metaHotel" class="meta-value"></span>
+    </div>
+    <div class="meta-row">
+      <span class="meta-label">チェックイン</span>
+      <span id="metaCheckIn" class="meta-value"></span>
+    </div>
+    <div class="meta-row">
+      <span class="meta-label">人数</span>
+      <span id="metaAdults" class="meta-value"></span>
+    </div>
+    <div class="meta-row">
+      <label class="meta-label" for="dateInput">出力する日付</label>
+      <input type="date" id="dateInput" />
+    </div>
+    <div class="meta-row">
+      <label class="meta-label" for="officialLabel">自社(公式)チャネルの表示名</label>
+      <input type="text" id="officialLabel" placeholder="TRIPLA（自社予約）" />
+    </div>
+  </section>
+
+  <section id="webappBox" class="meta">
+    <div class="meta-row">
+      <label class="meta-label" for="webhookUrl">Webアプリの送信先URL</label>
+      <input type="text" id="webhookUrl" placeholder="http://localhost:3000/api/prices" />
+    </div>
+    <div id="webappStatus" class="webapp-status"></div>
+  </section>
+
+  <section id="tableBox" class="table-box" hidden>
+    <div class="table-head-row">
+      <span id="rowCount" class="row-count"></span>
+      <span class="hint">同じチャネルが複数行ある場合は、実際のプランに合う1行だけチェックしてください。</span>
+    </div>
+    <div class="table-scroll">
+      <table id="rowsTable">
+        <thead>
+          <tr>
+            <th></th>
+            <th>チャネル</th>
+            <th>プラン</th>
+            <th>表示価格</th>
+            <th>実質価格</th>
+            <th>特記事項</th>
+          </tr>
+        </thead>
+        <tbody id="rowsBody"></tbody>
+      </table>
+    </div>
+  </section>
+
+  <section id="addDayBox" class="export-box" hidden>
+    <button id="addDayBtn" class="btn btn-primary">✓ この日を月次リストに追加</button>
+    <span id="addDayHint" class="copy-hint">追加しました</span>
+    <button id="sendDayBtn" class="btn">⚡ この日をWebアプリへ送信</button>
+    <span id="sendDayHint" class="copy-hint">送信しました</span>
+    <button id="toggleRawBtn" class="btn btn-ghost">生データ表示を切替</button>
+  </section>
+
+  <details id="rawBox" class="raw-box" hidden>
+    <summary>生データ（デバッグ用）</summary>
+    <textarea id="rawText" readonly></textarea>
+  </details>
+
+  <section id="monthlyBox" class="monthly-box">
+    <div class="table-head-row">
+      <span id="monthlyCount" class="row-count">月次リスト: 0日分</span>
+      <button id="clearMonthlyBtn" class="btn-link">全クリア</button>
+    </div>
+    <div class="table-scroll monthly-scroll">
+      <table id="monthlyTable">
+        <thead>
+          <tr>
+            <th>日付</th>
+            <th>ホテル</th>
+            <th>件数</th>
+            <th></th>
+          </tr>
+        </thead>
+        <tbody id="monthlyBody"></tbody>
+      </table>
+    </div>
+
+    <label class="include-unmapped">
+      <input type="checkbox" id="includeUnmapped" />
+      未対応チャネル（Booking.com等）も含めて出力する
+    </label>
+
+    <button id="monthlySendBtn" class="btn btn-primary">⚡ 月次リストをWebアプリへ一括送信</button>
+    <span id="monthlySendHint" class="copy-hint">送信しました</span>
+
+    <button id="monthlyCsvBtn" class="btn">月次CSVをダウンロード</button>
+    <div class="export-row">
+      <button id="monthlyCopyCsvBtn" class="btn">CSVをコピー</button>
+      <button id="monthlyCopyJsonBtn" class="btn">JSONをコピー</button>
+      <span id="monthlyCopyHint" class="copy-hint">コピーしました</span>
+    </div>
+  </section>
+
+  <footer>
+    <p>
+      ※ このページに表示されている情報を、ボタンを押した時だけ読み取ります。自動巡回・定期実行は行いません。
+      日付は自分でGoogle Hotels側の「&lt; &gt;」で切り替えてから、都度「取得」→「月次リストに追加」してください。
+      Googleのマークアップ変更により抽出が壊れることがあります。
+    </p>
+  </footer>
+
+  <script src="popup.js"></script>
+</body>
+</html>

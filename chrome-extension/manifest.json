@@ -1,0 +1,12 @@
+{
+  "manifest_version": 3,
+  "name": "OTA価格比較エクスポーター for Google Hotels",
+  "version": "1.0.0",
+  "description": "Google Hotelsの料金比較画面から各チャネルの価格・割引情報を抽出し、価格比較アプリ用CSV/JSONとして出力します。",
+  "action": {
+    "default_popup": "popup.html",
+    "default_title": "このページの価格を取得"
+  },
+  "permissions": ["activeTab", "scripting", "storage"],
+  "host_permissions": ["http://localhost/*", "http://127.0.0.1/*"]
+}
