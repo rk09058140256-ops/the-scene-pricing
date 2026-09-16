@@ -66,3 +66,16 @@ export function formatYen(value: number | null | undefined): string {
   if (value === null || value === undefined) return "-";
   return `¥${value.toLocaleString("ja-JP")}`;
 }
+
+/**
+ * ユーザーが設定した「推定割引率」（会員ランク別ポイント・即時利用ポイント等、
+ * Google Hotelsの画面には出てこない各OTA直サイト限定の還元）を実質価格に適用した参考値。
+ * あくまで推計であり、最安値判定・価格逆転アラートの計算には使わない。
+ */
+export function calcEstimatedPrice(
+  effectivePrice: number | null,
+  assumedDiscountPercent: number
+): number | null {
+  if (effectivePrice === null || !assumedDiscountPercent) return null;
+  return Math.max(0, Math.round(effectivePrice * (1 - assumedDiscountPercent / 100)));
+}

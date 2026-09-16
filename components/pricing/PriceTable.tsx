@@ -10,6 +10,8 @@ interface PriceTableProps {
   otas: OtaConfig[];
   records: DayRecord[];
   onUpdateEntry: (date: string, planName: string, otaId: string, entry: PriceEntry) => void;
+  assumedDiscounts: Record<string, number>;
+  estimateMode: boolean;
 }
 
 const WEEKDAY_JA = ["日", "月", "火", "水", "木", "金", "土"];
@@ -19,7 +21,13 @@ const WEEKDAY_JA = ["日", "月", "火", "水", "木", "金", "土"];
 const STICKY_DATE_CELL =
   "sticky left-0 shadow-[2px_0_4px_-2px_rgba(15,23,42,0.12)]";
 
-export function PriceTable({ otas, records, onUpdateEntry }: PriceTableProps) {
+export function PriceTable({
+  otas,
+  records,
+  onUpdateEntry,
+  assumedDiscounts,
+  estimateMode,
+}: PriceTableProps) {
   if (records.length === 0) {
     return (
       <div className="rounded-lg border border-dashed border-slate-300 bg-white p-10 text-center text-sm text-slate-400">
@@ -29,8 +37,15 @@ export function PriceTable({ otas, records, onUpdateEntry }: PriceTableProps) {
   }
 
   return (
-    <div className="overflow-x-auto rounded-lg border border-slate-200 bg-white shadow-sm">
-      <table className="w-full min-w-[860px] border-collapse text-sm">
+    <div className="flex flex-col gap-2">
+      {estimateMode && (
+        <p className="rounded-md border border-indigo-200 bg-indigo-50 px-3 py-2 text-xs text-indigo-700">
+          推定モード: セルの数値は設定した推定割引率を適用した参考値です。最安値ハイライトと価格逆転アラートは、これまで通りGoogle
+          Hotelsから取得した実測データのみで判定しています。
+        </p>
+      )}
+      <div className="overflow-x-auto rounded-lg border border-slate-200 bg-white shadow-sm">
+        <table className="w-full min-w-[860px] border-collapse text-sm">
         <thead>
           <tr>
             <th
@@ -87,6 +102,8 @@ export function PriceTable({ otas, records, onUpdateEntry }: PriceTableProps) {
                     isCheapest={analysis.cheapestOtaIds.includes(ota.id)}
                     isLosingCell={ota.isTripla === true && analysis.isTriplaLosing}
                     onSave={(entry) => onUpdateEntry(record.date, record.planName, ota.id, entry)}
+                    assumedPercent={assumedDiscounts[ota.id]}
+                    estimateMode={estimateMode}
                   />
                 ))}
                 <td className="border border-slate-200 px-3 py-2 align-top">
@@ -119,7 +136,8 @@ export function PriceTable({ otas, records, onUpdateEntry }: PriceTableProps) {
             );
           })}
         </tbody>
-      </table>
+        </table>
+      </div>
     </div>
   );
 }
