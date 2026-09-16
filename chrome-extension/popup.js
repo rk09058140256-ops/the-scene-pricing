@@ -422,10 +422,15 @@
             );
             return;
           }
-          setStatus(
-            "日付を " + result.after.checkIn + " 〜 " + result.after.checkOut + " に進めました。続けて「このページの価格を取得」を押してください。",
-            "ok"
-          );
+          var dateMsg = "日付を " + result.after.checkIn + " 〜 " + result.after.checkOut + " に進めました。";
+          if (result.priceMayBeStale) {
+            setStatus(
+              dateMsg + " 価格の再読み込みが完了したか確認できませんでした。少し待ってから「このページの価格を取得」を押してください。",
+              "error"
+            );
+          } else {
+            setStatus(dateMsg + " 続けて「このページの価格を取得」を押してください。", "ok");
+          }
         }
       );
     });
@@ -453,6 +458,9 @@
             setStatus((advResult && advResult.error) || "日付を進められませんでした。", "error");
             return;
           }
+          var staleWarning = advResult.priceMayBeStale
+            ? "（価格の再読み込み完了を確認できなかったため、古い日付の価格が混ざっている可能性があります。念のため内容をご確認ください）"
+            : "";
 
           setStatus("価格を取得しています...（" + advResult.after.checkIn + "）");
           chrome.scripting.executeScript(
@@ -489,7 +497,13 @@
                     selection.ambiguousOtaIds.join("、") +
                     " は複数プランのため自動選択できず未追加です（それ以外の" +
                     addResult.count +
-                    "件は追加済み）。テーブルで手動確認の上、必要なら「月次リストに追加」を再度押してください。",
+                    "件は追加済み）。テーブルで手動確認の上、必要なら「月次リストに追加」を再度押してください。" +
+                    staleWarning,
+                  "error"
+                );
+              } else if (staleWarning) {
+                setStatus(
+                  addResult.dateIso + " を追加しました（" + addResult.count + "件）。" + staleWarning,
                   "error"
                 );
               } else {
