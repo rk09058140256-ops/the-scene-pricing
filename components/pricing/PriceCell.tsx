@@ -112,12 +112,19 @@ export function PriceCell({ entry, isCheapest, isLosingCell, onSave }: PriceCell
               </span>
             )}
           </div>
-          <div className="text-[11px] text-slate-400">
-            表示 {formatYen(entry.price)} /{" "}
-            {entry.discountType === "percent"
-              ? `${entry.discountValue}%還元`
-              : `-¥${entry.discountValue.toLocaleString("ja-JP")}`}
-          </div>
+          {entry.discountValue > 0 ? (
+            <div className="flex flex-wrap items-baseline gap-x-1.5 text-[11px] text-slate-400">
+              <span className="line-through decoration-slate-300">{formatYen(entry.price)}</span>
+              <span className="text-emerald-600">
+                {entry.note ??
+                  (entry.discountType === "percent"
+                    ? `${entry.discountValue}%還元`
+                    : `-¥${entry.discountValue.toLocaleString("ja-JP")}`)}
+              </span>
+            </div>
+          ) : (
+            <div className="text-[11px] text-slate-400">表示 {formatYen(entry.price)}</div>
+          )}
         </div>
       ) : (
         <span className="text-xs text-slate-300">未入力（クリックで入力）</span>

@@ -14,6 +14,11 @@ interface PriceTableProps {
 
 const WEEKDAY_JA = ["日", "月", "火", "水", "木", "金", "土"];
 
+// 左端の日付列は横スクロールでも常に見えるよう sticky にする。
+// ヘッダー行との交差部分（コーナーセル）は縦横どちらのstickyにも勝つよう z-indexを最上位にする。
+const STICKY_DATE_CELL =
+  "sticky left-0 shadow-[2px_0_4px_-2px_rgba(15,23,42,0.12)]";
+
 export function PriceTable({ otas, records, onUpdateEntry }: PriceTableProps) {
   if (records.length === 0) {
     return (
@@ -26,9 +31,14 @@ export function PriceTable({ otas, records, onUpdateEntry }: PriceTableProps) {
   return (
     <div className="overflow-x-auto rounded-lg border border-slate-200 bg-white shadow-sm">
       <table className="w-full min-w-[860px] border-collapse text-sm">
-        <thead className="sticky top-0 z-10 bg-slate-50">
+        <thead>
           <tr>
-            <th className="border border-slate-200 px-3 py-2 text-left text-xs font-semibold text-slate-500">
+            <th
+              className={cn(
+                STICKY_DATE_CELL,
+                "top-0 z-30 border border-slate-200 bg-slate-50 px-3 py-2 text-left text-xs font-semibold text-slate-500"
+              )}
+            >
               日付
             </th>
             {otas.map((ota) => {
@@ -36,7 +46,7 @@ export function PriceTable({ otas, records, onUpdateEntry }: PriceTableProps) {
               return (
                 <th
                   key={ota.id}
-                  className="border border-slate-200 px-3 py-2 text-left text-xs font-semibold text-slate-500"
+                  className="sticky top-0 z-20 border border-slate-200 bg-slate-50 px-3 py-2 text-left text-xs font-semibold text-slate-500"
                 >
                   <span className="inline-flex items-center gap-1.5">
                     <span className={cn("h-2 w-2 rounded-full", accent.dot)} />
@@ -45,7 +55,7 @@ export function PriceTable({ otas, records, onUpdateEntry }: PriceTableProps) {
                 </th>
               );
             })}
-            <th className="border border-slate-200 px-3 py-2 text-left text-xs font-semibold text-slate-500">
+            <th className="sticky top-0 z-20 border border-slate-200 bg-slate-50 px-3 py-2 text-left text-xs font-semibold text-slate-500">
               差額（TRIPLA − 他社最安値）
             </th>
           </tr>
@@ -59,7 +69,13 @@ export function PriceTable({ otas, records, onUpdateEntry }: PriceTableProps) {
 
             return (
               <tr key={record.date} className={cn(analysis.isTriplaLosing && "bg-red-50/40")}>
-                <td className="border border-slate-200 px-3 py-2 align-top">
+                <td
+                  className={cn(
+                    STICKY_DATE_CELL,
+                    "z-10 border border-slate-200 px-3 py-2 align-top",
+                    analysis.isTriplaLosing ? "bg-red-50" : "bg-white"
+                  )}
+                >
                   <div className={cn("font-medium", isWeekend && "text-red-500")}>
                     {record.date}（{weekday}）
                   </div>

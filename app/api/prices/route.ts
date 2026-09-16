@@ -26,6 +26,7 @@ interface IncomingRow {
   price?: number;
   discountType?: string;
   discountValue?: number;
+  note?: string;
 }
 
 interface IncomingDay {
@@ -70,7 +71,8 @@ export async function POST(request: NextRequest) {
       prices[otaId] = {
         price,
         discountType,
-        discountValue: Number.isNaN(discountValueRaw) ? 0 : discountValueRaw
+        discountValue: Number.isNaN(discountValueRaw) ? 0 : discountValueRaw,
+        ...(row.note ? { note: row.note } : {})
       };
       if (row.otaName) otaNames[otaId] = row.otaName;
     }

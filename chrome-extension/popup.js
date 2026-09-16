@@ -5,12 +5,14 @@
     tabId: null,
     meta: null,
     rows: [], // { data: <row from content.js>, checked: boolean } — 現在のページの検出結果
-    collected: {} // { "YYYY-MM-DD": { hotelName, capturedAt, rows: [<row data>...] } } — 月次で蓄積した分
+    collected: {}, // { "YYYY-MM-DD": { hotelName, capturedAt, rows: [<row data>...] } } — 月次で蓄積した分
+    planMemory: {} // { otaId: planName } — 同一チャネルに複数プランがある場合に前回選んだプランを覚えておく
   };
 
   var els = {
     statusBox: document.getElementById("statusBox"),
     extractBtn: document.getElementById("extractBtn"),
+    advanceDayBtn: document.getElementById("advanceDayBtn"),
     metaBox: document.getElementById("metaBox"),
     metaHotel: document.getElementById("metaHotel"),
     metaCheckIn: document.getElementById("metaCheckIn"),
@@ -39,10 +41,11 @@
     sendDayBtn: document.getElementById("sendDayBtn"),
     sendDayHint: document.getElementById("sendDayHint"),
     monthlySendBtn: document.getElementById("monthlySendBtn"),
-    monthlySendHint: document.getElementById("monthlySendHint")
+    monthlySendHint: document.getElementById("monthlySendHint"),
+    advanceExtractAddBtn: document.getElementById("advanceExtractAddBtn")
   };
 
-  var DEFAULT_WEBHOOK_URL = "http://localhost:3000/api/prices";
+  var DEFAULT_WEBHOOK_URL = "https://the-scene-pricing.vercel.app/api/prices";
 
   function setStatus(msg, tone) {
     els.statusBox.textContent = msg || "";
@@ -272,6 +275,61 @@
     });
   }
 
+  // 同じチャネルに複数行（プラン違い）が検出された場合、前回そのチャネルで
+  // 選んでいたプラン名（state.planMemory）と完全一致する行を自動でチェックする。
+  // 一致しない/記憶が無い場合はそのチャネルをチェックOFFのままにし、要確認として報告する。
+  function buildInitialSelection(rows) {
+    var groups = {};
+    rows.forEach(function (data, idx) {
+      var otaId = mapChannel(data).otaId;
+      if (!groups[otaId]) groups[otaId] = [];
+      groups[otaId].push(idx);
+    });
+
+    var checked = rows.map(function () {
+      return false;
+    });
+    var ambiguousOtaIds = [];
+
+    Object.keys(groups).forEach(function (otaId) {
+      var indices = groups[otaId];
+      if (!mapChannel(rows[indices[0]]).recognized) return; // 未対応チャネルは既定OFFのまま
+
+      if (indices.length === 1) {
+        checked[indices[0]] = true;
+        return;
+      }
+
+      var remembered = state.planMemory[otaId];
+      var matched = remembered
+        ? indices.filter(function (i) {
+            return rows[i].planName === remembered;
+          })
+        : [];
+
+      if (matched.length === 1) {
+        checked[matched[0]] = true;
+      } else {
+        ambiguousOtaIds.push(otaId);
+      }
+    });
+
+    return { checked: checked, ambiguousOtaIds: ambiguousOtaIds };
+  }
+
+  function rememberPlanSelection(dataRows) {
+    var changed = false;
+    dataRows.forEach(function (data) {
+      if (!data.planName) return;
+      var otaId = mapChannel(data).otaId;
+      if (state.planMemory[otaId] !== data.planName) {
+        state.planMemory[otaId] = data.planName;
+        changed = true;
+      }
+    });
+    if (changed) chrome.storage.local.set({ planMemory: state.planMemory });
+  }
+
   function handleExtractResult(result) {
     if (!result || !result.rows || !result.rows.length) {
       setStatus(
@@ -281,21 +339,32 @@
       els.metaBox.hidden = true;
       els.tableBox.hidden = true;
       els.addDayBox.hidden = true;
-      return;
+      return { ambiguousOtaIds: [] };
     }
     state.meta = result.meta;
-    state.rows = result.rows.map(function (data) {
-      var mapped = mapChannel(data);
-      return { data: data, checked: mapped.recognized };
+    var selection = buildInitialSelection(result.rows);
+    state.rows = result.rows.map(function (data, idx) {
+      return { data: data, checked: selection.checked[idx] };
     });
     renderMeta();
     renderTable();
     els.rawText.value = JSON.stringify(result, null, 2);
-    setStatus(state.rows.length + "件を取得しました。内容を確認して「月次リストに追加」してください。", "ok");
+
+    if (selection.ambiguousOtaIds.length) {
+      setStatus(
+        state.rows.length +
+          "件を取得しました。複数プランが検出され自動選択できないチャネル: " +
+          selection.ambiguousOtaIds.join("、") +
+          "（テーブルで手動確認してください）",
+        "error"
+      );
+    } else {
+      setStatus(state.rows.length + "件を取得しました。内容を確認して「月次リストに追加」してください。", "ok");
+    }
+    return selection;
   }
 
-  els.extractBtn.addEventListener("click", function () {
-    setStatus("取得中...");
+  function withGoogleHotelsTab(callback) {
     chrome.tabs.query({ active: true, currentWindow: true }, function (tabs) {
       var tab = tabs && tabs[0];
       if (!tab || !tab.id) {
@@ -312,6 +381,13 @@
         return;
       }
 
+      callback(tab);
+    });
+  }
+
+  els.extractBtn.addEventListener("click", function () {
+    setStatus("取得中...");
+    withGoogleHotelsTab(function (tab) {
       chrome.scripting.executeScript(
         { target: { tabId: tab.id }, files: ["content.js"] },
         function (results) {
@@ -326,8 +402,104 @@
     });
   });
 
+  // 「次の日へ進める」: Google Hotels自身の日付ピッカーにある「▶」ボタンを
+  // その場で1回だけクリックする（自動ループではなく、ボタンを押した回数だけ実行される）。
+  els.advanceDayBtn.addEventListener("click", function () {
+    setStatus("日付を進めています...");
+    withGoogleHotelsTab(function (tab) {
+      chrome.scripting.executeScript(
+        { target: { tabId: tab.id }, files: ["advance-day.js"] },
+        function (results) {
+          if (chrome.runtime.lastError) {
+            setStatus("日付の切り替えに失敗しました: " + chrome.runtime.lastError.message, "error");
+            return;
+          }
+          var result = results && results[0] && results[0].result;
+          if (!result || !result.ok) {
+            setStatus(
+              (result && result.error) || "日付を進められませんでした。手動で「▶」を押してください。",
+              "error"
+            );
+            return;
+          }
+          setStatus(
+            "日付を " + result.after.checkIn + " 〜 " + result.after.checkOut + " に進めました。続けて「このページの価格を取得」を押してください。",
+            "ok"
+          );
+        }
+      );
+    });
+  });
+
   els.toggleRawBtn.addEventListener("click", function () {
     els.rawBox.hidden = !els.rawBox.hidden;
+  });
+
+  // 「次の日へ進めて取得・追加」: advance-day.js → content.js → 月次リストへの追加、を
+  // このボタン1クリックの中で順番に実行する。複数日を勝手にループする機能ではなく、
+  // 押した回数（＝1日分）だけこの3ステップをまとめて行うショートカット。
+  els.advanceExtractAddBtn.addEventListener("click", function () {
+    setStatus("日付を進めています...");
+    withGoogleHotelsTab(function (tab) {
+      chrome.scripting.executeScript(
+        { target: { tabId: tab.id }, files: ["advance-day.js"] },
+        function (advResults) {
+          if (chrome.runtime.lastError) {
+            setStatus("日付の切り替えに失敗しました: " + chrome.runtime.lastError.message, "error");
+            return;
+          }
+          var advResult = advResults && advResults[0] && advResults[0].result;
+          if (!advResult || !advResult.ok) {
+            setStatus((advResult && advResult.error) || "日付を進められませんでした。", "error");
+            return;
+          }
+
+          setStatus("価格を取得しています...（" + advResult.after.checkIn + "）");
+          chrome.scripting.executeScript(
+            { target: { tabId: tab.id }, files: ["content.js"] },
+            function (extResults) {
+              if (chrome.runtime.lastError) {
+                setStatus("抽出に失敗しました: " + chrome.runtime.lastError.message, "error");
+                return;
+              }
+              var extResult = extResults && extResults[0] && extResults[0].result;
+              if (!extResult || !extResult.rows || !extResult.rows.length) {
+                setStatus(
+                  "日付は " + advResult.after.checkIn + " まで進めましたが、価格データが見つかりませんでした。",
+                  "error"
+                );
+                return;
+              }
+
+              var selection = handleExtractResult(extResult);
+              var addResult = addCurrentSelectionToMonthlyList();
+
+              if (!addResult.ok) {
+                setStatus(
+                  advResult.after.checkIn + " の価格は取得できましたが、月次リストへの追加に失敗しました: " + addResult.error,
+                  "error"
+                );
+                return;
+              }
+
+              if (selection.ambiguousOtaIds.length) {
+                setStatus(
+                  addResult.dateIso +
+                    "：" +
+                    selection.ambiguousOtaIds.join("、") +
+                    " は複数プランのため自動選択できず未追加です（それ以外の" +
+                    addResult.count +
+                    "件は追加済み）。テーブルで手動確認の上、必要なら「月次リストに追加」を再度押してください。",
+                  "error"
+                );
+              } else {
+                setStatus(addResult.dateIso + " を追加しました（" + addResult.count + "件）。続けて押すと次の日に進みます。", "ok");
+              }
+            }
+          );
+        }
+      );
+    });
   });
 
   // ---------- 月次リスト（蓄積） ----------
@@ -386,31 +558,40 @@
     });
   }
 
-  els.addDayBtn.addEventListener("click", function () {
+  function addCurrentSelectionToMonthlyList() {
     var dateIso = els.dateInput.value;
     if (!dateIso) {
-      setStatus("出力する日付を指定してください。", "error");
-      return;
+      return { ok: false, error: "出力する日付を指定してください。" };
     }
     var picked = checkedRows();
     if (!picked.length) {
-      setStatus("追加するチャネルが選択されていません（チェックボックスをご確認ください）。", "error");
-      return;
+      return { ok: false, error: "追加するチャネルが選択されていません（チェックボックスをご確認ください）。" };
     }
+    var pickedData = picked.map(function (r) {
+      return r.data;
+    });
     state.collected[dateIso] = {
       hotelName: state.meta ? state.meta.hotelName : null,
       capturedAt: new Date().toISOString(),
-      rows: picked.map(function (r) {
-        return r.data;
-      })
+      rows: pickedData
     };
     persistCollected();
+    rememberPlanSelection(pickedData);
     renderMonthly();
+    return { ok: true, dateIso: dateIso, count: picked.length };
+  }
+
+  els.addDayBtn.addEventListener("click", function () {
+    var result = addCurrentSelectionToMonthlyList();
+    if (!result.ok) {
+      setStatus(result.error, "error");
+      return;
+    }
     els.addDayHint.classList.add("show");
     setTimeout(function () {
       els.addDayHint.classList.remove("show");
     }, 1500);
-    setStatus(dateIso + " を月次リストに追加しました（" + picked.length + "件）。", "ok");
+    setStatus(result.dateIso + " を月次リストに追加しました（" + result.count + "件）。", "ok");
   });
 
   els.clearMonthlyBtn.addEventListener("click", function () {
@@ -569,12 +750,15 @@
     chrome.storage.local.set({ officialLabel: els.officialLabel.value.trim() });
   });
 
-  chrome.storage.local.get(["officialLabel", "collected", "webhookUrl"], function (res) {
+  chrome.storage.local.get(["officialLabel", "collected", "webhookUrl", "planMemory"], function (res) {
     if (res && res.officialLabel) {
       els.officialLabel.value = res.officialLabel;
     }
     if (res && res.collected) {
       state.collected = res.collected;
+    }
+    if (res && res.planMemory) {
+      state.planMemory = res.planMemory;
     }
     els.webhookUrl.value = (res && res.webhookUrl) || DEFAULT_WEBHOOK_URL;
     renderMonthly();

@@ -81,10 +81,18 @@
     return m ? Number(m[0]) : null;
   }
 
-  function getHotelName() {
-    // ページ内に h1 が複数存在し、先頭は検索結果件数見出し（例:「東京都 · 15,000 件の結果」）。
-    // それを除外した最初の h1 がホテル名見出し。
+  function getHotelName(firstCta) {
+    // ページ内に h1 が複数存在し、検索結果件数見出しや「付近の場所」等の
+    // セクション見出しが h1 として描画されることがある（Google側のマークアップが不安定）。
+    // 最も安定して取れる基準は「価格比較の1行目（CTAボタン）より前にある最後の h1」＝
+    // その価格セクションを実際に見出している要素、という位置関係。
     var h1s = Array.prototype.slice.call(document.querySelectorAll("h1"));
+    if (firstCta) {
+      var preceding = h1s.filter(function (h) {
+        return !!(h.compareDocumentPosition(firstCta) & Node.DOCUMENT_POSITION_FOLLOWING);
+      });
+      if (preceding.length) return text(preceding[preceding.length - 1]);
+    }
     var candidate = h1s.filter(function (h) {
       var t = text(h);
       return t && t.indexOf("件の結果") === -1;
@@ -195,10 +203,11 @@
     };
   }
 
+  var visibleCtas = findCtaButtons().filter(isVisible);
+
   var seen = new Set();
   var rows = [];
-  findCtaButtons().forEach(function (cta) {
-    if (!isVisible(cta)) return;
+  visibleCtas.forEach(function (cta) {
     var parsed = extractRow(cta);
     if (!parsed) return;
     var dedupeKey = parsed.channelName + "|" + parsed.planName + "|" + parsed.finalPrice;
@@ -209,7 +218,7 @@
 
   var checkInOut = getCheckInOut();
   var meta = {
-    hotelName: getHotelName(),
+    hotelName: getHotelName(visibleCtas[0]),
     checkIn: checkInOut.checkIn,
     checkOut: checkInOut.checkOut,
     adults: getAdults(),
