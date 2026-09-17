@@ -17,8 +17,6 @@ const CURRENT_YM: YearMonth = { year: today.getFullYear(), month: today.getMonth
 const DEFAULT_YM: YearMonth = addMonths(CURRENT_YM, 1);
 const POLL_INTERVAL_MS = 4000;
 const NEW_OTA_ACCENTS = ["sky", "amber", "pink", "teal", "cyan", "lime", "fuchsia"];
-const ASSUMED_DISCOUNTS_STORAGE_KEY = "tripla-dashboard:assumedDiscounts";
-const ESTIMATE_MODE_STORAGE_KEY = "tripla-dashboard:estimateMode";
 
 interface LiveApiState {
   records: DayRecord[];
@@ -51,39 +49,9 @@ export function PriceDashboard() {
     lastSource: null
   });
   const [flash, setFlash] = useState(false);
-  const [assumedDiscounts, setAssumedDiscounts] = useState<Record<string, number>>({});
-  const [estimateMode, setEstimateMode] = useState(false);
   const lastSeenUpdateRef = useRef<string | null>(null);
 
   const monthOptions = useMemo(() => buildMonthOptions(CURRENT_YM, 3, 12), []);
-
-  // 推定割引率の設定・トグルはブラウザのlocalStorageに保存し、次回訪問時も引き継ぐ
-  useEffect(() => {
-    try {
-      const savedDiscounts = window.localStorage.getItem(ASSUMED_DISCOUNTS_STORAGE_KEY);
-      if (savedDiscounts) setAssumedDiscounts(JSON.parse(savedDiscounts));
-      const savedMode = window.localStorage.getItem(ESTIMATE_MODE_STORAGE_KEY);
-      if (savedMode) setEstimateMode(savedMode === "true");
-    } catch {
-      // localStorageが使えない環境（プライベートブラウズ等）では既定値のまま
-    }
-  }, []);
-
-  useEffect(() => {
-    try {
-      window.localStorage.setItem(ASSUMED_DISCOUNTS_STORAGE_KEY, JSON.stringify(assumedDiscounts));
-    } catch {
-      // no-op
-    }
-  }, [assumedDiscounts]);
-
-  useEffect(() => {
-    try {
-      window.localStorage.setItem(ESTIMATE_MODE_STORAGE_KEY, String(estimateMode));
-    } catch {
-      // no-op
-    }
-  }, [estimateMode]);
 
   // 対象月を切り替えたとき、その月の1日〜末日がまだデータを持っていなければデモ値で自動補完する
   useEffect(() => {
@@ -259,11 +227,6 @@ export function PriceDashboard() {
         onCsvUpload={handleCsvUpload}
         onDownloadCsv={handleDownloadCsv}
         importErrors={importErrors}
-        otas={otas}
-        assumedDiscounts={assumedDiscounts}
-        onAssumedDiscountsChange={setAssumedDiscounts}
-        estimateMode={estimateMode}
-        onEstimateModeChange={setEstimateMode}
       />
 
       <div
@@ -272,13 +235,7 @@ export function PriceDashboard() {
           flash && "shadow-[0_0_0_3px_rgba(16,185,129,0.35)]"
         )}
       >
-        <PriceTable
-          otas={otas}
-          records={filteredRecords}
-          onUpdateEntry={handleUpdateEntry}
-          assumedDiscounts={assumedDiscounts}
-          estimateMode={estimateMode}
-        />
+        <PriceTable otas={otas} records={filteredRecords} onUpdateEntry={handleUpdateEntry} />
       </div>
     </div>
   );

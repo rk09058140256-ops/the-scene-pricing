@@ -1,8 +1,7 @@
 "use client";
 
-import { useRef, useState } from "react";
+import { useRef } from "react";
 import { Button } from "@/components/ui/button";
-import { OtaConfig } from "@/lib/types";
 
 interface FiltersBarProps {
   alertOnly: boolean;
@@ -11,11 +10,6 @@ interface FiltersBarProps {
   onCsvUpload: (file: File) => void;
   onDownloadCsv: () => void;
   importErrors: string[];
-  otas: OtaConfig[];
-  assumedDiscounts: Record<string, number>;
-  onAssumedDiscountsChange: (value: Record<string, number>) => void;
-  estimateMode: boolean;
-  onEstimateModeChange: (value: boolean) => void;
 }
 
 export function FiltersBar({
@@ -25,24 +19,8 @@ export function FiltersBar({
   onCsvUpload,
   onDownloadCsv,
   importErrors,
-  otas,
-  assumedDiscounts,
-  onAssumedDiscountsChange,
-  estimateMode,
-  onEstimateModeChange,
 }: FiltersBarProps) {
   const fileInputRef = useRef<HTMLInputElement>(null);
-  const [showSettings, setShowSettings] = useState(false);
-
-  const competitorOtas = otas.filter((o) => !o.isTripla);
-
-  function handleRateChange(otaId: string, rawValue: string) {
-    const parsed = Number(rawValue);
-    onAssumedDiscountsChange({
-      ...assumedDiscounts,
-      [otaId]: Number.isNaN(parsed) ? 0 : Math.min(100, Math.max(0, parsed)),
-    });
-  }
 
   return (
     <div className="flex flex-col gap-3 rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
@@ -56,24 +34,6 @@ export function FiltersBar({
           }`}
         >
           ⚠ 価格逆転日のみ表示{alertCount > 0 ? `（${alertCount}）` : ""}
-        </button>
-
-        <button
-          onClick={() => onEstimateModeChange(!estimateMode)}
-          className={`h-8 rounded-full border px-3 text-xs font-medium transition-colors ${
-            estimateMode
-              ? "border-indigo-300 bg-indigo-100 text-indigo-700"
-              : "border-slate-300 bg-white text-slate-600 hover:bg-slate-50"
-          }`}
-        >
-          🔮 推定割引率を適用して表示
-        </button>
-
-        <button
-          onClick={() => setShowSettings((v) => !v)}
-          className="h-8 rounded-full border border-slate-300 bg-white px-3 text-xs font-medium text-slate-600 hover:bg-slate-50"
-        >
-          ⚙ 推定割引率の設定
         </button>
 
         <div className="ml-auto flex items-center gap-2">
@@ -96,31 +56,6 @@ export function FiltersBar({
           />
         </div>
       </div>
-
-      {showSettings && (
-        <div className="flex flex-col gap-2 rounded-md bg-slate-50 p-3">
-          <p className="text-xs text-slate-500">
-            各OTA直サイトの会員ポイント・即時利用ポイント等、Google
-            Hotelsの画面には出てこない割引をパーセントで見積もっておくと、テーブルに「推計実質価格」が注記されます（最安値判定・アラートには影響しません）。
-          </p>
-          <div className="flex flex-wrap gap-x-5 gap-y-2">
-            {competitorOtas.map((ota) => (
-              <label key={ota.id} className="flex items-center gap-1.5 text-xs text-slate-700">
-                {ota.name}
-                <input
-                  type="number"
-                  min={0}
-                  max={100}
-                  value={assumedDiscounts[ota.id] ?? 0}
-                  onChange={(e) => handleRateChange(ota.id, e.target.value)}
-                  className="h-7 w-16 rounded border border-slate-300 px-1.5 text-xs"
-                />
-                %
-              </label>
-            ))}
-          </div>
-        </div>
-      )}
 
       {importErrors.length > 0 && (
         <div className="rounded-md border border-amber-300 bg-amber-50 p-2 text-xs text-amber-700">

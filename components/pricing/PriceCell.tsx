@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { DiscountType, PriceEntry } from "@/lib/types";
-import { calcEffectivePrice, calcEstimatedPrice, formatYen } from "@/lib/pricing";
+import { calcEffectivePrice, formatYen } from "@/lib/pricing";
 import { cn } from "@/lib/utils";
 
 interface PriceCellProps {
@@ -10,20 +10,9 @@ interface PriceCellProps {
   isCheapest: boolean;
   isLosingCell: boolean;
   onSave: (entry: PriceEntry) => void;
-  /** このOTAに設定された推定割引率（%）。0またはundefinedなら推定なし */
-  assumedPercent?: number;
-  /** ONのときはテーブル全体の主表示を推定実質価格に切り替える（最安値判定には使わない） */
-  estimateMode: boolean;
 }
 
-export function PriceCell({
-  entry,
-  isCheapest,
-  isLosingCell,
-  onSave,
-  assumedPercent,
-  estimateMode,
-}: PriceCellProps) {
+export function PriceCell({ entry, isCheapest, isLosingCell, onSave }: PriceCellProps) {
   const [editing, setEditing] = useState(false);
   const [price, setPrice] = useState(String(entry?.price ?? 0));
   const [discountType, setDiscountType] = useState<DiscountType>(entry?.discountType ?? "fixed");
@@ -48,9 +37,6 @@ export function PriceCell({
   }
 
   const effective = calcEffectivePrice(entry);
-  const estimated = calcEstimatedPrice(effective, assumedPercent ?? 0);
-  const showEstimateAsPrimary = estimateMode && estimated !== null;
-  const primaryPrice = showEstimateAsPrimary ? estimated : effective;
 
   if (editing) {
     return (
@@ -119,32 +105,14 @@ export function PriceCell({
               isCheapest ? "text-emerald-700" : isLosingCell ? "text-red-700" : "text-slate-900"
             )}
           >
-            {formatYen(primaryPrice)}
+            {formatYen(effective)}
             {isCheapest && (
               <span className="rounded bg-emerald-600 px-1 py-0.5 text-[10px] font-medium text-white">
                 最安
               </span>
             )}
-            {showEstimateAsPrimary && (
-              <span className="rounded border border-indigo-300 px-1 py-0.5 text-[9px] font-medium text-indigo-600">
-                推定
-              </span>
-            )}
           </div>
-
-          {showEstimateAsPrimary ? (
-            <div className="flex flex-wrap items-baseline gap-x-1.5 text-[11px] text-slate-400">
-              <span>実測 {formatYen(effective)}</span>
-              {entry.discountValue > 0 && (
-                <span className="text-emerald-600">
-                  {entry.note ??
-                    (entry.discountType === "percent"
-                      ? `${entry.discountValue}%還元`
-                      : `-¥${entry.discountValue.toLocaleString("ja-JP")}`)}
-                </span>
-              )}
-            </div>
-          ) : entry.discountValue > 0 ? (
+          {entry.discountValue > 0 ? (
             <div className="flex flex-wrap items-baseline gap-x-1.5 text-[11px] text-slate-400">
               <span className="line-through decoration-slate-300">{formatYen(entry.price)}</span>
               <span className="text-emerald-600">
@@ -156,12 +124,6 @@ export function PriceCell({
             </div>
           ) : (
             <div className="text-[11px] text-slate-400">表示 {formatYen(entry.price)}</div>
-          )}
-
-          {!estimateMode && estimated !== null && (
-            <div className="text-[10.5px] text-indigo-500">
-              推計実質 {formatYen(estimated)}（-{assumedPercent}%適用時）
-            </div>
           )}
         </div>
       ) : (
