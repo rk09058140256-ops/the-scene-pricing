@@ -1,4 +1,4 @@
-import { createClient } from "@vercel/kv";
+import Redis from "ioredis";
 import { DayRecord } from "./types";
 import { mergeDayRecords } from "./csv";
 
@@ -10,35 +10,34 @@ interface ServerState {
 }
 
 const EMPTY_STATE: ServerState = { records: [], otaNames: {}, lastUpdated: null, lastSource: null };
-const KV_KEY = "tripla-price-store:v1";
+const REDIS_KEY = "tripla-price-store:v1";
 
 /**
- * Vercelの「Storage」タブから作成したRedis/KVを接続すると、通常は KV_REST_API_URL /
- * KV_REST_API_TOKEN が注入されるが、Marketplace経由の接続方法によっては
- * ストア名がプレフィックスされた変数名（例: MYSTORE_KV_REST_API_URL）になることがある。
- * どちらのパターンでも拾えるように探索する。
+ * Vercelの「Storage」経由で接続したRedisは、REST API形式（KV_REST_API_URL/TOKEN、
+ * @vercel/kv 向け）ではなく標準のRedis接続文字列（REDIS_URL、redis:// または rediss://）
+ * を注入するタイプだった（実機で確認済み）。ioredisでそのまま接続する。
+ * rediss:// の場合はioredisが自動でTLSを有効にする。
  */
-function findKvCredentials(): { url: string; token: string; source: string } | null {
-  if (process.env.KV_REST_API_URL && process.env.KV_REST_API_TOKEN) {
-    return { url: process.env.KV_REST_API_URL, token: process.env.KV_REST_API_TOKEN, source: "KV_REST_API_URL" };
-  }
-  const urlKey = Object.keys(process.env).find((k) => k.endsWith("_KV_REST_API_URL"));
-  if (urlKey) {
-    const prefix = urlKey.slice(0, -"_KV_REST_API_URL".length);
-    const tokenKey = `${prefix}_KV_REST_API_TOKEN`;
-    const url = process.env[urlKey];
-    const token = process.env[tokenKey];
-    if (url && token) return { url, token, source: urlKey };
-  }
-  return null;
-}
+const redisUrl = process.env.REDIS_URL;
 
-const kvCredentials = findKvCredentials();
-const kvClient = kvCredentials ? createClient({ url: kvCredentials.url, token: kvCredentials.token }) : null;
+const redisClient = redisUrl
+  ? new Redis(redisUrl, {
+      maxRetriesPerRequest: 3,
+      connectTimeout: 5000,
+      // サーバーレス関数が異常終了してもプロセス全体を巻き込んで再試行し続けないようにする
+      retryStrategy: (times) => (times > 3 ? null : Math.min(times * 200, 1000))
+    })
+  : null;
+
+if (redisClient) {
+  redisClient.on("error", (err) => {
+    console.error("[server-store] Redis connection error:", err.message);
+  });
+}
 
 // Next.js の dev サーバーはファイル変更のたびにモジュールを再評価するため、
 // globalThis に持たせて再評価をまたいで状態を保持する（Prisma クライアント等と同じ定石）。
-// KV未接続の環境（ローカル開発等）でのフォールバックとしても使う。
+// Redis未接続の環境（ローカル開発等）でのフォールバックとしても使う。
 const globalStore = globalThis as unknown as { __priceServerStoreFallback?: ServerState };
 
 function getMemoryStore(): ServerState {
@@ -49,17 +48,22 @@ function getMemoryStore(): ServerState {
 }
 
 async function readState(): Promise<ServerState> {
-  if (!kvClient) return getMemoryStore();
-  const state = await kvClient.get<ServerState>(KV_KEY);
-  return state ?? EMPTY_STATE;
+  if (!redisClient) return getMemoryStore();
+  const raw = await redisClient.get(REDIS_KEY);
+  if (!raw) return EMPTY_STATE;
+  try {
+    return JSON.parse(raw) as ServerState;
+  } catch {
+    return EMPTY_STATE;
+  }
 }
 
 async function writeState(state: ServerState): Promise<void> {
-  if (!kvClient) {
+  if (!redisClient) {
     Object.assign(getMemoryStore(), state);
     return;
   }
-  await kvClient.set(KV_KEY, state);
+  await redisClient.set(REDIS_KEY, JSON.stringify(state));
 }
 
 export async function getServerState(): Promise<ServerState> {
@@ -86,13 +90,26 @@ export async function mergeIncomingRecords(
   return next;
 }
 
-/** 接続診断用。実際の値は含めず、どの環境変数が見つかったか（名前のみ）を返す。 */
-export function getKvDiagnostics() {
-  return {
-    connected: Boolean(kvClient),
-    resolvedFrom: kvCredentials?.source ?? null,
-    matchingEnvKeys: Object.keys(process.env).filter((k) =>
-      /KV_REST_API|UPSTASH_REDIS|^REDIS_URL$|^KV_URL$/i.test(k)
-    )
-  };
+/** 接続診断用。実際の接続文字列は含めず、環境変数の有無と実際にPINGが通るかだけを返す。 */
+export async function getKvDiagnostics() {
+  const matchingEnvKeys = Object.keys(process.env).filter((k) =>
+    /KV_REST_API|UPSTASH_REDIS|^REDIS_URL$|^KV_URL$/i.test(k)
+  );
+
+  if (!redisClient) {
+    return { connected: false, resolvedFrom: null, matchingEnvKeys, pingOk: false };
+  }
+
+  try {
+    const pong = await redisClient.ping();
+    return { connected: true, resolvedFrom: "REDIS_URL", matchingEnvKeys, pingOk: pong === "PONG" };
+  } catch (err) {
+    return {
+      connected: true,
+      resolvedFrom: "REDIS_URL",
+      matchingEnvKeys,
+      pingOk: false,
+      pingError: err instanceof Error ? err.message : String(err)
+    };
+  }
 }

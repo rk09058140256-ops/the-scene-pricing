@@ -52,20 +52,21 @@ lib/types.ts              型定義（OTA設定・価格エントリ・日別レ
 lib/pricing.ts            実質価格計算・最安値判定・差額分析ロジック
 lib/csv.ts                CSVパース / マージ / テンプレート生成
 lib/sample-data.ts        デモ用サンプルデータ生成
-lib/server-store.ts       /api/prices が受信したデータの永続ストア（Vercel KV。未設定時はインメモリにフォールバック）
+lib/server-store.ts       /api/prices が受信したデータの永続ストア（Redis。未設定時はインメモリにフォールバック）
 chrome-extension/         Google Hotelsから価格を取得するChrome拡張（別途 chrome-extension/README.md 参照）
 ```
 
-## データの永続化（Vercel KV）
+## データの永続化（Redis）
 
-`/api/prices` が受信したデータは [lib/server-store.ts](lib/server-store.ts) を通じて保存されます。**Vercel KVの接続情報（環境変数）が設定されていればそこに永続保存され、未設定の場合はNext.jsプロセスのメモリ上に一時保存されるだけ**（再デプロイ・再起動で消えます）。半年単位でデータを蓄積したい場合は、以下の手順でVercel KVを有効にしてください（デプロイ済みのVercelプロジェクトのダッシュボードで行う作業です。このリポジトリ側の追加作業は不要）。
+`/api/prices` が受信したデータは [lib/server-store.ts](lib/server-store.ts) を通じて保存されます。**環境変数 `REDIS_URL` が設定されていればそこに永続保存され、未設定の場合はNext.jsプロセスのメモリ上に一時保存されるだけ**（再デプロイ・コールドスタートで消えます）。半年単位でデータを蓄積したい場合は、以下の手順でRedisを有効にしてください（デプロイ済みのVercelプロジェクトのダッシュボードで行う作業です。このリポジトリ側の追加作業は不要）。
 
-1. Vercelのプロジェクトダッシュボード → 「Storage」タブを開く
-2. 「Create Database」→「KV」（Upstash提供のRedis）を選択して作成
-3. 作成したKVをこのプロジェクトに接続する（Connect Project）。`KV_REST_API_URL` / `KV_REST_API_TOKEN` 等の環境変数が自動的にプロジェクトへ追加されます
+1. Vercelのプロジェクトダッシュボード →「Storage」タブを開く
+2. 「Create Database」から Redis 系のストアを作成し、プロジェクトに接続する（Connect Project）
+3. 接続すると環境変数が自動追加される。実機確認では `REDIS_URL`（`redis://` または `rediss://` 形式の接続文字列）が付与された（プロバイダーによっては `KV_REST_API_URL` / `KV_REST_API_TOKEN` のREST API形式になることもあり、本コードはどちらの形式でも `REDIS_URL` を優先的に使う）
 4. 環境変数が反映されるよう、プロジェクトを**再デプロイ**する（Deployments タブから Redeploy、または何かpushする）
+5. `GET /api/prices` のレスポンスに含まれる `kv` フィールド（`connected` / `pingOk` / `matchingEnvKeys`）で、実際に接続できているかを確認できる（接続文字列そのものは含まれない）
 
-これで `/api/prices` へのPOSTは既存データを消さずにupsert（追記・更新）され、Vercelの再デプロイやサーバーレス関数の再起動をまたいでもデータが保持されます。KV未設定のままでも動作はしますが、その場合は再デプロイのたびにデータがリセットされる点にご注意ください。
+これで `/api/prices` へのPOSTは既存データを消さずにupsert（追記・更新）され、Vercelの再デプロイやサーバーレス関数のコールドスタートをまたいでもデータが保持されます。Redis未設定のままでも動作はしますが、その場合は再デプロイのたびにデータがリセットされる点にご注意ください。
 
 ## 今後の拡張候補
 

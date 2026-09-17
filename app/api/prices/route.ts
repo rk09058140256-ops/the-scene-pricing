@@ -16,8 +16,8 @@ export async function OPTIONS() {
 }
 
 export async function GET() {
-  const state = await getServerState();
-  return NextResponse.json({ ...state, kv: getKvDiagnostics() }, { headers: CORS_HEADERS });
+  const [state, kv] = await Promise.all([getServerState(), getKvDiagnostics()]);
+  return NextResponse.json({ ...state, kv }, { headers: CORS_HEADERS });
 }
 
 interface IncomingRow {
