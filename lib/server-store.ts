@@ -1,4 +1,4 @@
-import { kv } from "@vercel/kv";
+import { createClient } from "@vercel/kv";
 import { DayRecord } from "./types";
 import { mergeDayRecords } from "./csv";
 
@@ -12,12 +12,33 @@ interface ServerState {
 const EMPTY_STATE: ServerState = { records: [], otaNames: {}, lastUpdated: null, lastSource: null };
 const KV_KEY = "tripla-price-store:v1";
 
-// Vercel KV（Upstash Redis）の接続情報が無い環境（ローカル開発等）では、
-// globalThis を使ったインメモリ保存にフォールバックする。
+/**
+ * Vercelの「Storage」タブから作成したRedis/KVを接続すると、通常は KV_REST_API_URL /
+ * KV_REST_API_TOKEN が注入されるが、Marketplace経由の接続方法によっては
+ * ストア名がプレフィックスされた変数名（例: MYSTORE_KV_REST_API_URL）になることがある。
+ * どちらのパターンでも拾えるように探索する。
+ */
+function findKvCredentials(): { url: string; token: string; source: string } | null {
+  if (process.env.KV_REST_API_URL && process.env.KV_REST_API_TOKEN) {
+    return { url: process.env.KV_REST_API_URL, token: process.env.KV_REST_API_TOKEN, source: "KV_REST_API_URL" };
+  }
+  const urlKey = Object.keys(process.env).find((k) => k.endsWith("_KV_REST_API_URL"));
+  if (urlKey) {
+    const prefix = urlKey.slice(0, -"_KV_REST_API_URL".length);
+    const tokenKey = `${prefix}_KV_REST_API_TOKEN`;
+    const url = process.env[urlKey];
+    const token = process.env[tokenKey];
+    if (url && token) return { url, token, source: urlKey };
+  }
+  return null;
+}
+
+const kvCredentials = findKvCredentials();
+const kvClient = kvCredentials ? createClient({ url: kvCredentials.url, token: kvCredentials.token }) : null;
+
 // Next.js の dev サーバーはファイル変更のたびにモジュールを再評価するため、
 // globalThis に持たせて再評価をまたいで状態を保持する（Prisma クライアント等と同じ定石）。
-const hasKv = Boolean(process.env.KV_REST_API_URL && process.env.KV_REST_API_TOKEN);
-
+// KV未接続の環境（ローカル開発等）でのフォールバックとしても使う。
 const globalStore = globalThis as unknown as { __priceServerStoreFallback?: ServerState };
 
 function getMemoryStore(): ServerState {
@@ -28,17 +49,17 @@ function getMemoryStore(): ServerState {
 }
 
 async function readState(): Promise<ServerState> {
-  if (!hasKv) return getMemoryStore();
-  const state = await kv.get<ServerState>(KV_KEY);
+  if (!kvClient) return getMemoryStore();
+  const state = await kvClient.get<ServerState>(KV_KEY);
   return state ?? EMPTY_STATE;
 }
 
 async function writeState(state: ServerState): Promise<void> {
-  if (!hasKv) {
+  if (!kvClient) {
     Object.assign(getMemoryStore(), state);
     return;
   }
-  await kv.set(KV_KEY, state);
+  await kvClient.set(KV_KEY, state);
 }
 
 export async function getServerState(): Promise<ServerState> {
@@ -63,4 +84,15 @@ export async function mergeIncomingRecords(
   };
   await writeState(next);
   return next;
+}
+
+/** 接続診断用。実際の値は含めず、どの環境変数が見つかったか（名前のみ）を返す。 */
+export function getKvDiagnostics() {
+  return {
+    connected: Boolean(kvClient),
+    resolvedFrom: kvCredentials?.source ?? null,
+    matchingEnvKeys: Object.keys(process.env).filter((k) =>
+      /KV_REST_API|UPSTASH_REDIS|^REDIS_URL$|^KV_URL$/i.test(k)
+    )
+  };
 }

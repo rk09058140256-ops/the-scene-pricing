@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { DayRecord, DiscountType, PriceEntry } from "@/lib/types";
 import { FIXED_PLAN_NAME } from "@/lib/constants";
-import { getServerState, mergeIncomingRecords } from "@/lib/server-store";
+import { getKvDiagnostics, getServerState, mergeIncomingRecords } from "@/lib/server-store";
 
 export const dynamic = "force-dynamic";
 
@@ -17,7 +17,7 @@ export async function OPTIONS() {
 
 export async function GET() {
   const state = await getServerState();
-  return NextResponse.json(state, { headers: CORS_HEADERS });
+  return NextResponse.json({ ...state, kv: getKvDiagnostics() }, { headers: CORS_HEADERS });
 }
 
 interface IncomingRow {
