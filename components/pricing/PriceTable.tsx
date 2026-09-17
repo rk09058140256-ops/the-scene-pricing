@@ -29,7 +29,7 @@ export function PriceTable({ otas, records, onUpdateEntry }: PriceTableProps) {
   }
 
   return (
-    <div className="overflow-x-auto rounded-lg border border-slate-200 bg-white shadow-sm">
+    <div className="max-h-[70vh] overflow-auto rounded-lg border border-slate-200 bg-white shadow-sm">
       <table className="w-full min-w-[860px] border-collapse text-sm">
         <thead>
           <tr>
