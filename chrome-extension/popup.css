@@ -71,6 +71,12 @@ header .sub {
   line-height: 1.5;
   color: var(--text-faint);
 }
+.plan-keywords-hint {
+  margin: 0;
+  font-size: 10px;
+  line-height: 1.5;
+  color: var(--text-faint);
+}
 
 .btn {
   font-size: 12px;

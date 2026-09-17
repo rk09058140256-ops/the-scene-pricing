@@ -42,7 +42,8 @@
     sendDayHint: document.getElementById("sendDayHint"),
     monthlySendBtn: document.getElementById("monthlySendBtn"),
     monthlySendHint: document.getElementById("monthlySendHint"),
-    advanceExtractAddBtn: document.getElementById("advanceExtractAddBtn")
+    advanceExtractAddBtn: document.getElementById("advanceExtractAddBtn"),
+    planKeywords: document.getElementById("planKeywords")
   };
 
   var DEFAULT_WEBHOOK_URL = "https://the-scene-pricing.vercel.app/api/prices";
@@ -275,12 +276,37 @@
     });
   }
 
-  // 同じチャネルに複数行（プラン違い）が検出された場合:
-  //   1. 前回そのチャネルで選んでいたプラン名（state.planMemory）と完全一致する行があればそれを選ぶ
-  //   2. 一致しない/記憶が無い場合は、そのチャネル内で最も安い実質価格（無ければ表示価格）の行を
-  //      自動で選ぶ（未追加のまま止めず、必ずどれか1行を選択する）
-  // どちらの経路で選ばれたかは呼び出し側に返し、フォールバックで選んだ分は
-  // ポップアップ上で「最安値を自動選択」として案内する（エラー扱いにはしない）。
+  // 「2階,スタンダードダブル,朝食,-夕朝食」のように、先頭に "-" を付けた語は
+  // 「含まれていてはいけない」除外キーワードとして扱う（似た名前のプラン違いを除外するため）。
+  function getPlanKeywords() {
+    var tokens = (els.planKeywords.value || "")
+      .split(/[,、]/)
+      .map(function (s) {
+        return s.trim();
+      })
+      .filter(Boolean);
+    var include = tokens.filter(function (t) {
+      return t.charAt(0) !== "-";
+    });
+    var exclude = tokens
+      .filter(function (t) {
+        return t.charAt(0) === "-";
+      })
+      .map(function (t) {
+        return t.slice(1).trim();
+      })
+      .filter(Boolean);
+    return { include: include, exclude: exclude };
+  }
+
+  // 同じチャネルに複数行（プラン違い）が検出された場合、次の優先順で1行だけ選ぶ:
+  //   1. 「対象プランの必須キーワード」が設定されていれば、含むべき語を全て含み、
+  //      除外キーワードを含まない行（複数階に同名の部屋があるプロパティ等で、
+  //      意図した部屋を確実に選ぶための最優先ルート）
+  //   2. 前回そのチャネルで選んでいたプラン名（state.planMemory）と完全一致する行
+  //   3. どちらにも当てはまらない場合は、そのチャネル内で最も安い実質価格（無ければ表示価格）の行
+  //      （未追加のまま止めず、必ずどれか1行を選ぶための最終フォールバック）
+  // 2または3の経路で選ばれた場合は呼び出し側に返し、ポップアップ上で案内する。
   function buildInitialSelection(rows) {
     var groups = {};
     rows.forEach(function (data, idx) {
@@ -289,10 +315,13 @@
       groups[otaId].push(idx);
     });
 
+    var keywords = getPlanKeywords();
+    var hasKeywords = keywords.include.length > 0 || keywords.exclude.length > 0;
     var checked = rows.map(function () {
       return false;
     });
     var cheapestFallbackOtaIds = [];
+    var keywordMatchedOtaIds = [];
 
     Object.keys(groups).forEach(function (otaId) {
       var indices = groups[otaId];
@@ -301,6 +330,36 @@
       if (indices.length === 1) {
         checked[indices[0]] = true;
         return;
+      }
+
+      if (hasKeywords) {
+        var keywordMatches = indices.filter(function (i) {
+          var planName = rows[i].planName || "";
+          var includeOk = keywords.include.every(function (kw) {
+            return planName.indexOf(kw) !== -1;
+          });
+          var excludeOk = keywords.exclude.every(function (kw) {
+            return planName.indexOf(kw) === -1;
+          });
+          return includeOk && excludeOk;
+        });
+        if (keywordMatches.length === 1) {
+          checked[keywordMatches[0]] = true;
+          keywordMatchedOtaIds.push(otaId);
+          return;
+        }
+        if (keywordMatches.length > 1) {
+          // キーワードだけでは1件に絞れない場合、その中で最安値を選ぶ
+          // （無関係な部屋タイプに広がらないよう、候補はキーワード一致した行の中だけに限定する）
+          var cheapestAmongMatches = keywordMatches.reduce(function (best, i) {
+            var priceI = rows[i].finalPrice !== null ? rows[i].finalPrice : rows[i].displayPrice;
+            var priceBest = rows[best].finalPrice !== null ? rows[best].finalPrice : rows[best].displayPrice;
+            return priceI < priceBest ? i : best;
+          }, keywordMatches[0]);
+          checked[cheapestAmongMatches] = true;
+          keywordMatchedOtaIds.push(otaId);
+          return;
+        }
       }
 
       var remembered = state.planMemory[otaId];
@@ -330,7 +389,7 @@
       cheapestFallbackOtaIds.push(otaId);
     });
 
-    return { checked: checked, cheapestFallbackOtaIds: cheapestFallbackOtaIds };
+    return { checked: checked, cheapestFallbackOtaIds: cheapestFallbackOtaIds, keywordMatchedOtaIds: keywordMatchedOtaIds };
   }
 
   function rememberPlanSelection(dataRows) {
@@ -355,7 +414,7 @@
       els.metaBox.hidden = true;
       els.tableBox.hidden = true;
       els.addDayBox.hidden = true;
-      return { cheapestFallbackOtaIds: [] };
+      return { cheapestFallbackOtaIds: [], keywordMatchedOtaIds: [] };
     }
     state.meta = result.meta;
     var selection = buildInitialSelection(result.rows);
@@ -366,16 +425,21 @@
     renderTable();
     els.rawText.value = JSON.stringify(result, null, 2);
 
+    var msg = state.rows.length + "件を取得しました。";
+    if (selection.keywordMatchedOtaIds.length) {
+      msg += " キーワード一致で選択: " + selection.keywordMatchedOtaIds.join("、") + "。";
+    }
     if (selection.cheapestFallbackOtaIds.length) {
-      setStatus(
-        state.rows.length +
-          "件を取得しました。複数プランが検出され最安値を自動選択したチャネル: " +
-          selection.cheapestFallbackOtaIds.join("、") +
-          "（違うプランを比較したい場合はテーブルでチェックし直してください）",
-        "ok"
-      );
+      msg +=
+        " 複数プランが検出され最安値を自動選択したチャネル: " +
+        selection.cheapestFallbackOtaIds.join("、") +
+        "（意図した部屋と違う可能性があるので、テーブルでご確認ください）";
+      setStatus(msg, "error");
+    } else if (!selection.keywordMatchedOtaIds.length) {
+      msg += " 内容を確認して「月次リストに追加」してください。";
+      setStatus(msg, "ok");
     } else {
-      setStatus(state.rows.length + "件を取得しました。内容を確認して「月次リストに追加」してください。", "ok");
+      setStatus(msg, "ok");
     }
     return selection;
   }
@@ -506,35 +570,20 @@
                 return;
               }
 
-              if (selection.cheapestFallbackOtaIds.length && staleWarning) {
-                setStatus(
-                  addResult.dateIso +
-                    " を追加しました（" +
-                    addResult.count +
-                    "件、うち最安値を自動選択: " +
-                    selection.cheapestFallbackOtaIds.join("、") +
-                    "）。" +
-                    staleWarning,
-                  "error"
-                );
-              } else if (selection.cheapestFallbackOtaIds.length) {
-                setStatus(
-                  addResult.dateIso +
-                    " を追加しました（" +
-                    addResult.count +
-                    "件、うち最安値を自動選択: " +
-                    selection.cheapestFallbackOtaIds.join("、") +
-                    "）。続けて押すと次の日に進みます。",
-                  "ok"
-                );
-              } else if (staleWarning) {
-                setStatus(
-                  addResult.dateIso + " を追加しました（" + addResult.count + "件）。" + staleWarning,
-                  "error"
-                );
-              } else {
-                setStatus(addResult.dateIso + " を追加しました（" + addResult.count + "件）。続けて押すと次の日に進みます。", "ok");
+              var addedMsg = addResult.dateIso + " を追加しました（" + addResult.count + "件）。";
+              if (selection.keywordMatchedOtaIds.length) {
+                addedMsg += " キーワード一致: " + selection.keywordMatchedOtaIds.join("、") + "。";
               }
+              if (selection.cheapestFallbackOtaIds.length) {
+                addedMsg +=
+                  " 最安値を自動選択（要確認）: " + selection.cheapestFallbackOtaIds.join("、") + "。";
+              } else {
+                addedMsg += " 続けて押すと次の日に進みます。";
+              }
+              if (staleWarning) addedMsg += staleWarning;
+
+              var hasWarning = Boolean(selection.cheapestFallbackOtaIds.length || staleWarning);
+              setStatus(addedMsg, hasWarning ? "error" : "ok");
             }
           );
         }
@@ -790,17 +839,27 @@
     chrome.storage.local.set({ officialLabel: els.officialLabel.value.trim() });
   });
 
-  chrome.storage.local.get(["officialLabel", "collected", "webhookUrl", "planMemory"], function (res) {
-    if (res && res.officialLabel) {
-      els.officialLabel.value = res.officialLabel;
-    }
-    if (res && res.collected) {
-      state.collected = res.collected;
-    }
-    if (res && res.planMemory) {
-      state.planMemory = res.planMemory;
-    }
-    els.webhookUrl.value = (res && res.webhookUrl) || DEFAULT_WEBHOOK_URL;
-    renderMonthly();
+  els.planKeywords.addEventListener("change", function () {
+    chrome.storage.local.set({ planKeywords: els.planKeywords.value.trim() });
   });
+
+  chrome.storage.local.get(
+    ["officialLabel", "collected", "webhookUrl", "planMemory", "planKeywords"],
+    function (res) {
+      if (res && res.officialLabel) {
+        els.officialLabel.value = res.officialLabel;
+      }
+      if (res && res.collected) {
+        state.collected = res.collected;
+      }
+      if (res && res.planMemory) {
+        state.planMemory = res.planMemory;
+      }
+      if (res && res.planKeywords) {
+        els.planKeywords.value = res.planKeywords;
+      }
+      els.webhookUrl.value = (res && res.webhookUrl) || DEFAULT_WEBHOOK_URL;
+      renderMonthly();
+    }
+  );
 })();
