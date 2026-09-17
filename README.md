@@ -52,13 +52,23 @@ lib/types.ts              型定義（OTA設定・価格エントリ・日別レ
 lib/pricing.ts            実質価格計算・最安値判定・差額分析ロジック
 lib/csv.ts                CSVパース / マージ / テンプレート生成
 lib/sample-data.ts        デモ用サンプルデータ生成
-lib/server-store.ts       /api/prices が受信したデータのインメモリストア
+lib/server-store.ts       /api/prices が受信したデータの永続ストア（Vercel KV。未設定時はインメモリにフォールバック）
 chrome-extension/         Google Hotelsから価格を取得するChrome拡張（別途 chrome-extension/README.md 参照）
 ```
 
+## データの永続化（Vercel KV）
+
+`/api/prices` が受信したデータは [lib/server-store.ts](lib/server-store.ts) を通じて保存されます。**Vercel KVの接続情報（環境変数）が設定されていればそこに永続保存され、未設定の場合はNext.jsプロセスのメモリ上に一時保存されるだけ**（再デプロイ・再起動で消えます）。半年単位でデータを蓄積したい場合は、以下の手順でVercel KVを有効にしてください（デプロイ済みのVercelプロジェクトのダッシュボードで行う作業です。このリポジトリ側の追加作業は不要）。
+
+1. Vercelのプロジェクトダッシュボード → 「Storage」タブを開く
+2. 「Create Database」→「KV」（Upstash提供のRedis）を選択して作成
+3. 作成したKVをこのプロジェクトに接続する（Connect Project）。`KV_REST_API_URL` / `KV_REST_API_TOKEN` 等の環境変数が自動的にプロジェクトへ追加されます
+4. 環境変数が反映されるよう、プロジェクトを**再デプロイ**する（Deployments タブから Redeploy、または何かpushする）
+
+これで `/api/prices` へのPOSTは既存データを消さずにupsert（追記・更新）され、Vercelの再デプロイやサーバーレス関数の再起動をまたいでもデータが保持されます。KV未設定のままでも動作はしますが、その場合は再デプロイのたびにデータがリセットされる点にご注意ください。
+
 ## 今後の拡張候補
 
-- `/api/prices` の永続化（現状はNext.jsプロセスのメモリ上のみ。DB接続への置き換え）
 - OTAごとの既定割引率のプリセット管理UI
 - 複数プラン・複数客室タイプの同時比較、月またぎのカレンダービュー
 - 価格逆転検知時のSlack/メール通知連携

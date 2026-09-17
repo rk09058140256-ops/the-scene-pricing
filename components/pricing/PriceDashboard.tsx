@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { DayRecord, OtaConfig, PriceEntry } from "@/lib/types";
 import { defaultOtas, generateSampleMonth } from "@/lib/sample-data";
 import { FIXED_PLAN_NAME, OCCUPANCY_LABEL } from "@/lib/constants";
@@ -49,6 +49,7 @@ export function PriceDashboard() {
     lastSource: null
   });
   const [flash, setFlash] = useState(false);
+  const [refreshing, setRefreshing] = useState(false);
   const lastSeenUpdateRef = useRef<string | null>(null);
 
   const monthOptions = useMemo(() => buildMonthOptions(CURRENT_YM, 3, 12), []);
@@ -69,51 +70,51 @@ export function PriceDashboard() {
     });
   }, [selectedYm]);
 
-  // Chrome拡張（Google Hotels連携）からのデータを /api/prices 経由でポーリング受信し、
-  // 新着があればテーブルへマージして軽くハイライトする。
-  useEffect(() => {
-    let cancelled = false;
+  // Chrome拡張（Google Hotels連携）からのデータを /api/prices 経由で取得し、
+  // 新着があればテーブルへマージ（upsert）して軽くハイライトする。既存データを消すことはない。
+  const poll = useCallback(async () => {
+    try {
+      const res = await fetch("/api/prices", { cache: "no-store" });
+      if (!res.ok) throw new Error("bad response");
+      const data: LiveApiState = await res.json();
 
-    async function poll() {
-      try {
-        const res = await fetch("/api/prices", { cache: "no-store" });
-        if (!res.ok) throw new Error("bad response");
-        const data: LiveApiState = await res.json();
-        if (cancelled) return;
+      setSyncStatus({ reachable: true, lastUpdated: data.lastUpdated, lastSource: data.lastSource });
 
-        setSyncStatus({ reachable: true, lastUpdated: data.lastUpdated, lastSource: data.lastSource });
-
-        if (data.lastUpdated && data.lastUpdated !== lastSeenUpdateRef.current) {
-          lastSeenUpdateRef.current = data.lastUpdated;
-          if (data.records.length > 0) {
-            setRecords((prev) => mergeDayRecords(prev, data.records));
-            setOtas((prev) => {
-              const map = new Map(prev.map((o) => [o.id, o]));
-              let changed = false;
-              Object.entries(data.otaNames || {}).forEach(([id, name], idx) => {
-                if (!map.has(id)) {
-                  map.set(id, { id, name, accent: NEW_OTA_ACCENTS[idx % NEW_OTA_ACCENTS.length] });
-                  changed = true;
-                }
-              });
-              return changed ? Array.from(map.values()) : prev;
+      if (data.lastUpdated && data.lastUpdated !== lastSeenUpdateRef.current) {
+        lastSeenUpdateRef.current = data.lastUpdated;
+        if (data.records.length > 0) {
+          setRecords((prev) => mergeDayRecords(prev, data.records));
+          setOtas((prev) => {
+            const map = new Map(prev.map((o) => [o.id, o]));
+            let changed = false;
+            Object.entries(data.otaNames || {}).forEach(([id, name], idx) => {
+              if (!map.has(id)) {
+                map.set(id, { id, name, accent: NEW_OTA_ACCENTS[idx % NEW_OTA_ACCENTS.length] });
+                changed = true;
+              }
             });
-            setFlash(true);
-            setTimeout(() => setFlash(false), 900);
-          }
+            return changed ? Array.from(map.values()) : prev;
+          });
+          setFlash(true);
+          setTimeout(() => setFlash(false), 900);
         }
-      } catch {
-        if (!cancelled) setSyncStatus((prev) => ({ ...prev, reachable: false }));
       }
+    } catch {
+      setSyncStatus((prev) => ({ ...prev, reachable: false }));
     }
+  }, []);
 
+  useEffect(() => {
     poll();
     const interval = setInterval(poll, POLL_INTERVAL_MS);
-    return () => {
-      cancelled = true;
-      clearInterval(interval);
-    };
-  }, []);
+    return () => clearInterval(interval);
+  }, [poll]);
+
+  async function handleManualRefresh() {
+    setRefreshing(true);
+    await poll();
+    setRefreshing(false);
+  }
 
   const monthRecords = useMemo(
     () =>
@@ -195,6 +196,14 @@ export function PriceDashboard() {
                 : "Google Hotels連携: 待機中"
               : "Google Hotels連携: 未接続"}
           </div>
+          <button
+            onClick={handleManualRefresh}
+            disabled={refreshing}
+            title="保存済みの最新データを再取得します（既存データは消えません）"
+            className="flex h-7 w-7 items-center justify-center rounded-full border border-slate-200 bg-white text-slate-500 transition-colors hover:bg-slate-50 disabled:opacity-50"
+          >
+            <span className={cn("text-sm", refreshing && "animate-spin")}>↻</span>
+          </button>
           <div className="flex items-center gap-2">
             <label htmlFor="target-month" className="text-xs font-medium text-slate-500">
               対象月

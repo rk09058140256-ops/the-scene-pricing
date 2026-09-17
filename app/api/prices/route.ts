@@ -16,7 +16,7 @@ export async function OPTIONS() {
 }
 
 export async function GET() {
-  const state = getServerState();
+  const state = await getServerState();
   return NextResponse.json(state, { headers: CORS_HEADERS });
 }
 
@@ -86,7 +86,7 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ ok: false, error: "no valid rows in payload" }, { status: 400, headers: CORS_HEADERS });
   }
 
-  const state = mergeIncomingRecords(records, otaNames, body.source || "unknown");
+  const state = await mergeIncomingRecords(records, otaNames, body.source || "unknown");
 
   return NextResponse.json(
     {
