@@ -90,6 +90,18 @@ export async function mergeIncomingRecords(
   return next;
 }
 
+/** 指定した日付のレコードだけを削除する（誤投入したテストデータ等の掃除用）。他の日付には影響しない。 */
+export async function deleteRecordsByDate(dates: string[]): Promise<ServerState> {
+  const current = await readState();
+  const dateSet = new Set(dates);
+  const next: ServerState = {
+    ...current,
+    records: current.records.filter((r) => !dateSet.has(r.date))
+  };
+  await writeState(next);
+  return next;
+}
+
 /** 接続診断用。実際の接続文字列は含めず、環境変数の有無と実際にPINGが通るかだけを返す。 */
 export async function getKvDiagnostics() {
   const matchingEnvKeys = Object.keys(process.env).filter((k) =>

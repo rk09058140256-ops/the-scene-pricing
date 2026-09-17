@@ -1,13 +1,13 @@
 import { NextRequest, NextResponse } from "next/server";
 import { DayRecord, DiscountType, PriceEntry } from "@/lib/types";
 import { FIXED_PLAN_NAME } from "@/lib/constants";
-import { getKvDiagnostics, getServerState, mergeIncomingRecords } from "@/lib/server-store";
+import { deleteRecordsByDate, getKvDiagnostics, getServerState, mergeIncomingRecords } from "@/lib/server-store";
 
 export const dynamic = "force-dynamic";
 
 const CORS_HEADERS = {
   "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
+  "Access-Control-Allow-Methods": "GET, POST, DELETE, OPTIONS",
   "Access-Control-Allow-Headers": "Content-Type"
 };
 
@@ -95,6 +95,28 @@ export async function POST(request: NextRequest) {
       datesAffected,
       totalStored: state.records.length
     },
+    { headers: CORS_HEADERS }
+  );
+}
+
+/** 指定した日付のレコードだけを削除する（他の日付には影響しない）。body: { dates: ["YYYY-MM-DD", ...] } */
+export async function DELETE(request: NextRequest) {
+  let body: { dates?: string[] };
+  try {
+    body = await request.json();
+  } catch {
+    return NextResponse.json({ ok: false, error: "invalid JSON body" }, { status: 400, headers: CORS_HEADERS });
+  }
+
+  const dates = Array.isArray(body.dates) ? body.dates.filter((d) => /^\d{4}-\d{2}-\d{2}$/.test(d)) : [];
+  if (!dates.length) {
+    return NextResponse.json({ ok: false, error: "dates is empty" }, { status: 400, headers: CORS_HEADERS });
+  }
+
+  const state = await deleteRecordsByDate(dates);
+
+  return NextResponse.json(
+    { ok: true, deletedDates: dates, totalStored: state.records.length },
     { headers: CORS_HEADERS }
   );
 }
