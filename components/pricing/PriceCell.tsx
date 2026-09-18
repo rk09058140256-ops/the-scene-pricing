@@ -17,15 +17,22 @@ export function PriceCell({ entry, isCheapest, isLosingCell, onSave }: PriceCell
   const [price, setPrice] = useState(String(entry?.price ?? 0));
   const [discountType, setDiscountType] = useState<DiscountType>(entry?.discountType ?? "fixed");
   const [discountValue, setDiscountValue] = useState(String(entry?.discountValue ?? 0));
+  const [isFull, setIsFull] = useState(entry?.status === "full");
 
   function startEditing() {
     setPrice(String(entry?.price ?? 0));
     setDiscountType(entry?.discountType ?? "fixed");
     setDiscountValue(String(entry?.discountValue ?? 0));
+    setIsFull(entry?.status === "full");
     setEditing(true);
   }
 
   function save() {
+    if (isFull) {
+      onSave({ price: 0, discountType: "fixed", discountValue: 0, status: "full" });
+      setEditing(false);
+      return;
+    }
     const parsedPrice = Number(price);
     const parsedDiscount = Number(discountValue);
     onSave({
@@ -42,20 +49,31 @@ export function PriceCell({ entry, isCheapest, isLosingCell, onSave }: PriceCell
     return (
       <td className="border border-slate-200 bg-white p-2 align-top">
         <div className="flex flex-col gap-1">
+          <label className="flex items-center gap-1.5 text-[11px] font-medium text-slate-600">
+            <input
+              type="checkbox"
+              checked={isFull}
+              onChange={(e) => setIsFull(e.target.checked)}
+              className="h-3.5 w-3.5"
+            />
+            満室（空室なし）
+          </label>
           <input
             type="number"
             value={price}
             onChange={(e) => setPrice(e.target.value)}
             onKeyDown={(e) => e.key === "Enter" && save()}
-            className="h-7 w-24 rounded border border-slate-300 px-1.5 text-xs"
+            className="h-7 w-24 rounded border border-slate-300 px-1.5 text-xs disabled:bg-slate-100 disabled:text-slate-400"
             placeholder="表示価格"
-            autoFocus
+            disabled={isFull}
+            autoFocus={!isFull}
           />
           <div className="flex gap-1">
             <select
               value={discountType}
               onChange={(e) => setDiscountType(e.target.value as DiscountType)}
-              className="h-7 rounded border border-slate-300 text-xs"
+              className="h-7 rounded border border-slate-300 text-xs disabled:bg-slate-100 disabled:text-slate-400"
+              disabled={isFull}
             >
               <option value="fixed">円引</option>
               <option value="percent">%還元</option>
@@ -65,8 +83,9 @@ export function PriceCell({ entry, isCheapest, isLosingCell, onSave }: PriceCell
               value={discountValue}
               onChange={(e) => setDiscountValue(e.target.value)}
               onKeyDown={(e) => e.key === "Enter" && save()}
-              className="h-7 w-16 rounded border border-slate-300 px-1.5 text-xs"
+              className="h-7 w-16 rounded border border-slate-300 px-1.5 text-xs disabled:bg-slate-100 disabled:text-slate-400"
               placeholder="割引"
+              disabled={isFull}
             />
           </div>
           <div className="flex gap-1">
@@ -97,7 +116,14 @@ export function PriceCell({ entry, isCheapest, isLosingCell, onSave }: PriceCell
         isLosingCell && !isCheapest && "bg-red-50"
       )}
     >
-      {entry ? (
+      {entry ? entry.status === "full" ? (
+        <div className="flex flex-col gap-0.5">
+          <span className="inline-flex w-fit items-center rounded bg-slate-500 px-2 py-0.5 text-xs font-semibold text-white">
+            満室
+          </span>
+          <span className="text-[11px] text-slate-400">空室なし（クリックで編集）</span>
+        </div>
+      ) : (
         <div className="flex flex-col gap-0.5">
           <div
             className={cn(

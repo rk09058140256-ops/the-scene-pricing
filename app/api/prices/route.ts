@@ -28,6 +28,8 @@ interface IncomingRow {
   discountValue?: number;
   note?: string;
   bookingUrl?: string;
+  /** "FULL"（大文字小文字は問わない）の場合、価格ではなく満室（空室なし）として保存する */
+  status?: string;
 }
 
 /** ダッシュボード側で <a href> として描画するため、http(s) の妥当なURLだけ通す */
@@ -76,8 +78,23 @@ export async function POST(request: NextRequest) {
     const prices: Record<string, PriceEntry> = {};
     for (const row of day.rows) {
       const otaId = (row.otaId || "").trim();
+      if (!otaId) continue;
+
+      const isFull = typeof row.status === "string" && row.status.trim().toUpperCase() === "FULL";
+      if (isFull) {
+        prices[otaId] = {
+          price: 0,
+          discountType: "fixed",
+          discountValue: 0,
+          status: "full",
+          ...(row.note ? { note: row.note } : {})
+        };
+        if (row.otaName) otaNames[otaId] = row.otaName;
+        continue;
+      }
+
       const price = Number(row.price);
-      if (!otaId || Number.isNaN(price)) continue;
+      if (Number.isNaN(price)) continue;
 
       const discountType: DiscountType = row.discountType === "percent" ? "percent" : "fixed";
       const discountValueRaw = Number(row.discountValue ?? 0);

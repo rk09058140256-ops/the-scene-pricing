@@ -8,6 +8,8 @@ interface CsvRow {
   price: string;
   discountType: string;
   discountValue: string;
+  /** "full"（大文字小文字は問わない）の場合、price等は無視して満室として扱う */
+  status?: string;
 }
 
 export interface CsvImportResult {
@@ -47,13 +49,24 @@ export function parseCsvText(
       return;
     }
 
-    const price = Number(row.price);
-    const discountValueRaw = Number(row.discountValue ?? 0);
-    const discountType: DiscountType = row.discountType === "percent" ? "percent" : "fixed";
+    const isFull = (row.status || "").trim().toLowerCase() === "full";
 
-    if (Number.isNaN(price)) {
-      errors.push(`行${idx + 2}: price(${row.price}) が数値ではありません`);
-      return;
+    let entry: PriceEntry;
+    if (isFull) {
+      entry = { price: 0, discountType: "fixed", discountValue: 0, status: "full" };
+    } else {
+      const price = Number(row.price);
+      if (Number.isNaN(price)) {
+        errors.push(`行${idx + 2}: price(${row.price}) が数値ではありません`);
+        return;
+      }
+      const discountValueRaw = Number(row.discountValue ?? 0);
+      const discountType: DiscountType = row.discountType === "percent" ? "percent" : "fixed";
+      entry = {
+        price,
+        discountType,
+        discountValue: Number.isNaN(discountValueRaw) ? 0 : discountValueRaw,
+      };
     }
 
     if (!otaMap.has(otaId)) {
@@ -64,12 +77,6 @@ export function parseCsvText(
       });
       accentIndex += 1;
     }
-
-    const entry: PriceEntry = {
-      price,
-      discountType,
-      discountValue: Number.isNaN(discountValueRaw) ? 0 : discountValueRaw,
-    };
 
     const existing = recordMap.get(date);
     if (existing) {
@@ -104,13 +111,17 @@ export function mergeDayRecords(base: DayRecord[], incoming: DayRecord[]): DayRe
 
 /** 表示中の月の全日程を、現在の価格データのままCSVとして書き出す（未入力のOTAは行を省略） */
 export function buildCsvFromRecords(records: DayRecord[], otas: OtaConfig[]): string {
-  const header = "date,otaId,otaName,price,discountType,discountValue";
+  const header = "date,otaId,otaName,price,discountType,discountValue,status";
   const rows: string[] = [];
   for (const rec of records) {
     for (const ota of otas) {
       const entry = rec.prices[ota.id];
       if (!entry) continue;
-      rows.push(`${rec.date},${ota.id},${ota.name},${entry.price},${entry.discountType},${entry.discountValue}`);
+      if (entry.status === "full") {
+        rows.push(`${rec.date},${ota.id},${ota.name},,,,full`);
+      } else {
+        rows.push(`${rec.date},${ota.id},${ota.name},${entry.price},${entry.discountType},${entry.discountValue},`);
+      }
     }
   }
   return [header, ...rows].join("\n");

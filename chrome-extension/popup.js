@@ -7,7 +7,8 @@
     rows: [], // { data: <row from content.js>, checked: boolean } — 現在のページの検出結果
     collected: {}, // { "YYYY-MM-DD": { hotelName, capturedAt, rows: [<row data>...] } } — 月次で蓄積した分
     planMemory: {}, // { otaId: planName } — 同一チャネルに複数プランがある場合に前回選んだプランを覚えておく
-    comboBusy: false // 「次の日へ進めて取得・追加」処理中は true。連打による多重実行を防ぐ
+    comboBusy: false, // 「次の日へ進めて取得・追加」処理中は true。連打による多重実行を防ぐ
+    lastSelection: null // 直近の buildInitialSelection() の結果（soldOut 判定を追加処理で参照するため）
   };
 
   var els = {
@@ -136,6 +137,16 @@
       .filter(Boolean);
   }
 
+  // 「満室」判定されたチャネルをWebアプリ/CSV向けの行に変換する。
+  // buildInitialSelection は対応チャネル（tripla/楽天/じゃらん/一休）にしか満室判定を
+  // 行わないため、ここでの追加フィルタは不要。価格情報を持たないため、data.displayPrice
+  // 等は含めず status: "FULL" のみで表現する。
+  function toApiSoldOutRows(soldOutList) {
+    return (soldOutList || []).map(function (s) {
+      return { otaId: s.otaId, otaName: s.otaName, status: "FULL" };
+    });
+  }
+
   function setWebappStatus(msg, tone) {
     els.webappStatus.textContent = msg || "";
     els.webappStatus.className = "webapp-status" + (tone ? " " + tone : "");
@@ -189,7 +200,8 @@
       return;
     }
     var picked = checkedRows();
-    if (!picked.length) {
+    var soldOut = (state.lastSelection && state.lastSelection.soldOut) || [];
+    if (!picked.length && !soldOut.length) {
       setStatus("送信するチャネルが選択されていません（チェックボックスをご確認ください）。", "error");
       return;
     }
@@ -197,7 +209,7 @@
       picked.map(function (r) {
         return r.data;
       })
-    );
+    ).concat(toApiSoldOutRows(soldOut));
     if (!rows.length) {
       setWebappStatus("送信できる行がありません（未対応チャネルのみ選択されています）。", "error");
       return;
@@ -312,6 +324,10 @@
     return { include: include, exclude: exclude };
   }
 
+  function hasAnyPrice(row) {
+    return row.finalPrice !== null || row.displayPrice !== null;
+  }
+
   // 同じチャネルに複数行（プラン違い）が検出された場合、次の優先順で1行だけ選ぶ:
   //   1. 「対象プランの必須キーワード」が設定されていれば、含むべき語を全て含み、
   //      除外キーワードを含まない行（複数階に同名の部屋があるプロパティ等で、
@@ -320,6 +336,11 @@
   //   3. どちらにも当てはまらない場合は、そのチャネル内で最も安い実質価格（無ければ表示価格）の行
   //      （未追加のまま止めず、必ずどれか1行を選ぶための最終フォールバック）
   // 2または3の経路で選ばれた場合は呼び出し側に返し、ポップアップ上で案内する。
+  //
+  // 「満室（soldOut）」判定: そのチャネルが画面上には表示されているが、
+  //   - 必須/除外キーワードに一致する行が1件も無い（＝対象プランの取り扱いが無い）、または
+  //   - 価格が取得できた行が1件も無い（＝表示はあるが価格要素が無い）
+  //   場合は、無関係な部屋タイプを誤って選ばないよう選択をスキップし、満室として扱う。
   function buildInitialSelection(rows) {
     var groups = {};
     rows.forEach(function (data, idx) {
@@ -335,12 +356,28 @@
     });
     var cheapestFallbackOtaIds = [];
     var keywordMatchedOtaIds = [];
+    var soldOut = []; // [{ otaId, otaName }]
 
     Object.keys(groups).forEach(function (otaId) {
       var indices = groups[otaId];
-      if (!mapChannel(rows[indices[0]]).recognized) return; // 未対応チャネルは既定OFFのまま
+      var mappedFirst = mapChannel(rows[indices[0]]);
+      if (!mappedFirst.recognized) return; // 未対応チャネルは既定OFFのまま
+
+      function markSoldOut() {
+        soldOut.push({ otaId: otaId, otaName: mappedFirst.otaName });
+      }
+      function priceOf(i) {
+        return rows[i].finalPrice !== null ? rows[i].finalPrice : rows[i].displayPrice;
+      }
+      function hasAnyPriceByIdx(i) {
+        return hasAnyPrice(rows[i]);
+      }
 
       if (indices.length === 1) {
+        if (!hasAnyPrice(rows[indices[0]])) {
+          markSoldOut();
+          return;
+        }
         checked[indices[0]] = true;
         return;
       }
@@ -356,23 +393,29 @@
           });
           return includeOk && excludeOk;
         });
-        if (keywordMatches.length === 1) {
-          checked[keywordMatches[0]] = true;
+        if (keywordMatches.length === 0) {
+          // 他の部屋タイプは表示されているが、対象プランに一致する行が無い＝対象プランは満室
+          markSoldOut();
+          return;
+        }
+        var keywordMatchesWithPrice = keywordMatches.filter(hasAnyPriceByIdx);
+        if (!keywordMatchesWithPrice.length) {
+          markSoldOut();
+          return;
+        }
+        if (keywordMatchesWithPrice.length === 1) {
+          checked[keywordMatchesWithPrice[0]] = true;
           keywordMatchedOtaIds.push(otaId);
           return;
         }
-        if (keywordMatches.length > 1) {
-          // キーワードだけでは1件に絞れない場合、その中で最安値を選ぶ
-          // （無関係な部屋タイプに広がらないよう、候補はキーワード一致した行の中だけに限定する）
-          var cheapestAmongMatches = keywordMatches.reduce(function (best, i) {
-            var priceI = rows[i].finalPrice !== null ? rows[i].finalPrice : rows[i].displayPrice;
-            var priceBest = rows[best].finalPrice !== null ? rows[best].finalPrice : rows[best].displayPrice;
-            return priceI < priceBest ? i : best;
-          }, keywordMatches[0]);
-          checked[cheapestAmongMatches] = true;
-          keywordMatchedOtaIds.push(otaId);
-          return;
-        }
+        // キーワードだけでは1件に絞れない場合、その中で最安値を選ぶ
+        // （無関係な部屋タイプに広がらないよう、候補はキーワード一致した行の中だけに限定する）
+        var cheapestAmongMatches = keywordMatchesWithPrice.reduce(function (best, i) {
+          return priceOf(i) < priceOf(best) ? i : best;
+        }, keywordMatchesWithPrice[0]);
+        checked[cheapestAmongMatches] = true;
+        keywordMatchedOtaIds.push(otaId);
+        return;
       }
 
       var remembered = state.planMemory[otaId];
@@ -382,27 +425,32 @@
           })
         : [];
 
-      if (matched.length === 1) {
+      if (matched.length === 1 && hasAnyPrice(rows[matched[0]])) {
         checked[matched[0]] = true;
         return;
       }
 
-      var withPrice = indices.filter(function (i) {
-        return rows[i].finalPrice !== null || rows[i].displayPrice !== null;
-      });
-      if (!withPrice.length) return; // 価格が取れている行が1つも無い場合のみスキップ
+      var withPrice = indices.filter(hasAnyPriceByIdx);
+      if (!withPrice.length) {
+        // 価格が取れている行が1つも無い＝満室
+        markSoldOut();
+        return;
+      }
 
       var cheapestIdx = withPrice.reduce(function (best, i) {
-        var priceI = rows[i].finalPrice !== null ? rows[i].finalPrice : rows[i].displayPrice;
-        var priceBest = rows[best].finalPrice !== null ? rows[best].finalPrice : rows[best].displayPrice;
-        return priceI < priceBest ? i : best;
+        return priceOf(i) < priceOf(best) ? i : best;
       }, withPrice[0]);
 
       checked[cheapestIdx] = true;
       cheapestFallbackOtaIds.push(otaId);
     });
 
-    return { checked: checked, cheapestFallbackOtaIds: cheapestFallbackOtaIds, keywordMatchedOtaIds: keywordMatchedOtaIds };
+    return {
+      checked: checked,
+      cheapestFallbackOtaIds: cheapestFallbackOtaIds,
+      keywordMatchedOtaIds: keywordMatchedOtaIds,
+      soldOut: soldOut
+    };
   }
 
   function rememberPlanSelection(dataRows) {
@@ -427,10 +475,12 @@
       els.metaBox.hidden = true;
       els.tableBox.hidden = true;
       els.addDayBox.hidden = true;
-      return { cheapestFallbackOtaIds: [], keywordMatchedOtaIds: [] };
+      state.lastSelection = { cheapestFallbackOtaIds: [], keywordMatchedOtaIds: [], soldOut: [] };
+      return state.lastSelection;
     }
     state.meta = result.meta;
     var selection = buildInitialSelection(result.rows);
+    state.lastSelection = selection;
     state.rows = result.rows.map(function (data, idx) {
       return { data: data, checked: selection.checked[idx] };
     });
@@ -442,18 +492,26 @@
     if (selection.keywordMatchedOtaIds.length) {
       msg += " キーワード一致で選択: " + selection.keywordMatchedOtaIds.join("、") + "。";
     }
+    if (selection.soldOut.length) {
+      msg +=
+        " 満室と判定: " +
+        selection.soldOut
+          .map(function (s) {
+            return s.otaName;
+          })
+          .join("、") +
+        "（対象プランに一致する空室が見つかりませんでした。月次リストには「満室」として記録されます）";
+    }
+    var hasWarning = Boolean(selection.cheapestFallbackOtaIds.length);
     if (selection.cheapestFallbackOtaIds.length) {
       msg +=
         " 複数プランが検出され最安値を自動選択したチャネル: " +
         selection.cheapestFallbackOtaIds.join("、") +
         "（意図した部屋と違う可能性があるので、テーブルでご確認ください）";
-      setStatus(msg, "error");
-    } else if (!selection.keywordMatchedOtaIds.length) {
+    } else if (!selection.keywordMatchedOtaIds.length && !selection.soldOut.length) {
       msg += " 内容を確認して「月次リストに追加」してください。";
-      setStatus(msg, "ok");
-    } else {
-      setStatus(msg, "ok");
     }
+    setStatus(msg, hasWarning ? "error" : "ok");
     return selection;
   }
 
@@ -598,7 +656,9 @@
                 return;
               }
 
-              var addedMsg = addResult.dateIso + " を追加しました（" + addResult.count + "件）。";
+              var addedMsg = addResult.dateIso + " を追加しました（" + addResult.count + "件";
+              if (addResult.soldOutCount) addedMsg += "、満室" + addResult.soldOutCount + "件";
+              addedMsg += "）。";
               if (selection.keywordMatchedOtaIds.length) {
                 addedMsg += " キーワード一致: " + selection.keywordMatchedOtaIds.join("、") + "。";
               }
@@ -703,7 +763,8 @@
       tdHotel.textContent = entry.hotelName || "-";
 
       var tdCount = document.createElement("td");
-      tdCount.textContent = entry.rows.length + "件";
+      var soldOutCount = (entry.soldOut || []).length;
+      tdCount.textContent = entry.rows.length + "件" + (soldOutCount ? "（満室" + soldOutCount + "件）" : "");
 
       var tdRemove = document.createElement("td");
       var removeBtn = document.createElement("button");
@@ -731,7 +792,8 @@
       return { ok: false, error: "出力する日付を指定してください。" };
     }
     var picked = checkedRows();
-    if (!picked.length) {
+    var soldOut = (state.lastSelection && state.lastSelection.soldOut) || [];
+    if (!picked.length && !soldOut.length) {
       return { ok: false, error: "追加するチャネルが選択されていません（チェックボックスをご確認ください）。" };
     }
     var pickedData = picked.map(function (r) {
@@ -740,12 +802,13 @@
     state.collected[dateIso] = {
       hotelName: state.meta ? state.meta.hotelName : null,
       capturedAt: new Date().toISOString(),
-      rows: pickedData
+      rows: pickedData,
+      soldOut: soldOut
     };
     persistCollected();
     rememberPlanSelection(pickedData);
     renderMonthly();
-    return { ok: true, dateIso: dateIso, count: picked.length };
+    return { ok: true, dateIso: dateIso, count: picked.length, soldOutCount: soldOut.length };
   }
 
   els.addDayBtn.addEventListener("click", function () {
@@ -758,7 +821,10 @@
     setTimeout(function () {
       els.addDayHint.classList.remove("show");
     }, 1500);
-    setStatus(result.dateIso + " を月次リストに追加しました（" + result.count + "件）。", "ok");
+    var addMsg = result.dateIso + " を月次リストに追加しました（" + result.count + "件";
+    if (result.soldOutCount) addMsg += "、満室" + result.soldOutCount + "件";
+    addMsg += "）。";
+    setStatus(addMsg, "ok");
   });
 
   els.clearMonthlyBtn.addEventListener("click", function () {
@@ -775,7 +841,7 @@
 
   function buildMonthlyCsv() {
     var includeUnmapped = els.includeUnmapped.checked;
-    var header = "date,otaId,otaName,price,discountType,discountValue";
+    var header = "date,otaId,otaName,price,discountType,discountValue,status";
     var lines = [header];
     collectedDates().forEach(function (dateIso) {
       state.collected[dateIso].rows.forEach(function (data) {
@@ -783,8 +849,11 @@
         var mapped = mapChannel(data);
         if (!includeUnmapped && !mapped.recognized) return;
         lines.push(
-          [dateIso, csvField(mapped.otaId), csvField(mapped.otaName), data.displayPrice, "fixed", data.discountYen || 0].join(",")
+          [dateIso, csvField(mapped.otaId), csvField(mapped.otaName), data.displayPrice, "fixed", data.discountYen || 0, ""].join(",")
         );
+      });
+      (state.collected[dateIso].soldOut || []).forEach(function (s) {
+        lines.push([dateIso, csvField(s.otaId), csvField(s.otaName), "", "", "", "full"].join(","));
       });
     });
     return lines.join("\n");
@@ -794,27 +863,27 @@
     var includeUnmapped = els.includeUnmapped.checked;
     var out = collectedDates().map(function (dateIso) {
       var entry = state.collected[dateIso];
-      return {
-        date: dateIso,
-        hotelName: entry.hotelName,
-        rows: entry.rows
-          .map(function (data) {
-            var mapped = mapChannel(data);
-            if (!includeUnmapped && !mapped.recognized) return null;
-            return {
-              otaId: mapped.otaId,
-              otaName: mapped.otaName,
-              planName: data.planName,
-              price: data.displayPrice,
-              finalPrice: data.finalPrice,
-              discountType: "fixed",
-              discountValue: data.discountYen || 0,
-              note: data.note,
-              bookingUrl: data.bookingUrl || undefined
-            };
-          })
-          .filter(Boolean)
-      };
+      var rows = entry.rows
+        .map(function (data) {
+          var mapped = mapChannel(data);
+          if (!includeUnmapped && !mapped.recognized) return null;
+          return {
+            otaId: mapped.otaId,
+            otaName: mapped.otaName,
+            planName: data.planName,
+            price: data.displayPrice,
+            finalPrice: data.finalPrice,
+            discountType: "fixed",
+            discountValue: data.discountYen || 0,
+            note: data.note,
+            bookingUrl: data.bookingUrl || undefined
+          };
+        })
+        .filter(Boolean);
+      (entry.soldOut || []).forEach(function (s) {
+        rows.push({ otaId: s.otaId, otaName: s.otaName, status: "FULL" });
+      });
+      return { date: dateIso, hotelName: entry.hotelName, rows: rows };
     });
     return JSON.stringify(out, null, 2);
   }
@@ -827,7 +896,10 @@
     }
     var days = dates
       .map(function (dateIso) {
-        return { date: dateIso, rows: toApiRows(state.collected[dateIso].rows) };
+        var rows = toApiRows(state.collected[dateIso].rows).concat(
+          toApiSoldOutRows(state.collected[dateIso].soldOut)
+        );
+        return { date: dateIso, rows: rows };
       })
       .filter(function (d) {
         return d.rows.length > 0;

@@ -22,6 +22,11 @@ export interface PriceEntry {
    * いずれかから取得される。社内モニタリング用途のため両方とも許容している。
    */
   bookingUrl?: string;
+  /**
+   * "full" の場合、対象プランの空室が無い（満室）ことが確認済みで、price等は意味を持たない。
+   * 未設定（undefined）は「まだ取得・入力されていない」ことを表し、"full"とは区別する。
+   */
+  status?: "full";
 }
 
 export interface DayRecord {

@@ -3,6 +3,7 @@ import { DayRecord, OtaConfig, PriceEntry } from "./types";
 /** 実質販売価格 = 表示価格 - 即時割引 - ポイント還元相当額 */
 export function calcEffectivePrice(entry: PriceEntry | undefined): number | null {
   if (!entry) return null;
+  if (entry.status === "full") return null; // 満室セルは最安値・逆転判定の対象外
   const discount =
     entry.discountType === "percent"
       ? entry.price * (entry.discountValue / 100)
