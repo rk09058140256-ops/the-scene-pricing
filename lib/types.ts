@@ -16,6 +16,12 @@ export interface PriceEntry {
   discountValue: number;
   /** 割引・ポイント還元の元表記（例: "メンバー価格、4% オフ" "楽天ポイント 225 pt (1%)"）。手入力/CSV由来の場合はなし */
   note?: string;
+  /**
+   * このチャネルの予約ページへの直URL（日付・部屋タイプ等が反映された状態）。
+   * Google Hotelsの「無料掲載枠」経由で取得できた場合のみ設定される。
+   * 広告クリック計測リンク（有料スポンサー枠）は再利用しないため、無い場合もある。
+   */
+  bookingUrl?: string;
 }
 
 export interface DayRecord {

@@ -220,6 +220,11 @@ tbody tr.unmapped {
   background: var(--good-soft);
   color: var(--good);
 }
+.booking-link {
+  margin-left: 4px;
+  text-decoration: none;
+  font-size: 11px;
+}
 
 .export-box {
   display: flex;

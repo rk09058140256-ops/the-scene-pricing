@@ -27,6 +27,19 @@ interface IncomingRow {
   discountType?: string;
   discountValue?: number;
   note?: string;
+  bookingUrl?: string;
+}
+
+/** ダッシュボード側で <a href> として描画するため、http(s) の妥当なURLだけ通す */
+function sanitizeBookingUrl(value: unknown): string | undefined {
+  if (typeof value !== "string" || value.length > 2000) return undefined;
+  try {
+    const parsed = new URL(value);
+    if (parsed.protocol !== "http:" && parsed.protocol !== "https:") return undefined;
+    return value;
+  } catch {
+    return undefined;
+  }
 }
 
 interface IncomingDay {
@@ -68,11 +81,13 @@ export async function POST(request: NextRequest) {
 
       const discountType: DiscountType = row.discountType === "percent" ? "percent" : "fixed";
       const discountValueRaw = Number(row.discountValue ?? 0);
+      const bookingUrl = sanitizeBookingUrl(row.bookingUrl);
       prices[otaId] = {
         price,
         discountType,
         discountValue: Number.isNaN(discountValueRaw) ? 0 : discountValueRaw,
-        ...(row.note ? { note: row.note } : {})
+        ...(row.note ? { note: row.note } : {}),
+        ...(bookingUrl ? { bookingUrl } : {})
       };
       if (row.otaName) otaNames[otaId] = row.otaName;
     }

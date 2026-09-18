@@ -117,6 +117,28 @@
     return null;
   }
 
+  /**
+   * 行（<a>）のリンク先から、安全に再利用できる予約ページの直URLだけを取り出す。
+   *
+   * Google Hotelsのリンクには2種類ある:
+   *   - スポンサー枠: "/aclk?...&gclid=...&adurl" 形式（Google広告のクリック計測リダイレクト）
+   *   - 無料掲載枠:   "/travel/lodging/clk?pc=...&pcurl=<実URL>&s=...&ap=1" 形式
+   * 後者は pcurl パラメータに実際の予約ページURL（チェックイン日・部屋タイプ・価格まで
+   * クエリに含む）がそのまま入っている。前者（広告リンク）は、後から時間が経ってから
+   * 保存済みURLを再クリックすると広告クリックの計測が歪む可能性があるため、
+   * 意図的に取得・保存しない（該当チャネルは bookingUrl が null になる）。
+   */
+  function extractBookingUrl(row) {
+    var href = row.getAttribute("href");
+    if (!href || href.indexOf("/travel/lodging/clk") !== 0) return null;
+    try {
+      var full = new URL(href, location.origin);
+      return full.searchParams.get("pcurl");
+    } catch (e) {
+      return null;
+    }
+  }
+
   function extractNote(rowText) {
     var memberOff = rowText.match(/メンバー価格[、,]?\s*(\d+)\s*%\s*オフ/);
     if (memberOff) return "メンバー価格、" + memberOff[1] + "% オフ";
@@ -185,6 +207,7 @@
 
     var planName = guessPlanName(row, channelName);
     var note = extractNote(rowText);
+    var bookingUrl = extractBookingUrl(row);
 
     var discountYen = 0;
     if (displayPrice !== null && finalPrice !== null && displayPrice > finalPrice) {
@@ -199,21 +222,32 @@
       finalPrice: finalPrice,
       discountYen: discountYen,
       note: note,
+      bookingUrl: bookingUrl,
       rawText: rowText.slice(0, 280)
     };
   }
 
   var visibleCtas = findCtaButtons().filter(isVisible);
 
-  var seen = new Set();
-  var rows = [];
+  // 同じチャネル・プラン・価格の行が、スポンサー枠と無料掲載枠の両方に重複して
+  // 出ることがある。後勝ちではなく「まだ bookingUrl を持っていなければ補完する」形で
+  // マージし、どちらかの表示順に関わらず安全なURLを取りこぼさないようにする。
+  var byKey = new Map();
+  var order = [];
   visibleCtas.forEach(function (cta) {
     var parsed = extractRow(cta);
     if (!parsed) return;
     var dedupeKey = parsed.channelName + "|" + parsed.planName + "|" + parsed.finalPrice;
-    if (seen.has(dedupeKey)) return;
-    seen.add(dedupeKey);
-    rows.push(parsed);
+    var existing = byKey.get(dedupeKey);
+    if (!existing) {
+      byKey.set(dedupeKey, parsed);
+      order.push(dedupeKey);
+    } else if (!existing.bookingUrl && parsed.bookingUrl) {
+      existing.bookingUrl = parsed.bookingUrl;
+    }
+  });
+  var rows = order.map(function (key) {
+    return byKey.get(key);
   });
 
   var checkInOut = getCheckInOut();

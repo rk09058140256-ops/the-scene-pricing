@@ -127,7 +127,8 @@
           discountType: "fixed",
           discountValue: data.discountYen || 0,
           planName: data.planName,
-          note: data.note
+          note: data.note,
+          bookingUrl: data.bookingUrl || undefined
         };
       })
       .filter(Boolean);
@@ -249,6 +250,16 @@
         tag.className = "channel-tag";
         tag.textContent = mapped.otaId;
         tdChannel.appendChild(tag);
+      }
+      if (r.data.bookingUrl) {
+        var link = document.createElement("a");
+        link.href = r.data.bookingUrl;
+        link.target = "_blank";
+        link.rel = "noopener noreferrer";
+        link.className = "booking-link";
+        link.textContent = "🔗";
+        link.title = "予約ページを新しいタブで開く";
+        tdChannel.appendChild(link);
       }
 
       var tdPlan = document.createElement("td");
@@ -731,7 +742,8 @@
               finalPrice: data.finalPrice,
               discountType: "fixed",
               discountValue: data.discountYen || 0,
-              note: data.note
+              note: data.note,
+              bookingUrl: data.bookingUrl || undefined
             };
           })
           .filter(Boolean)

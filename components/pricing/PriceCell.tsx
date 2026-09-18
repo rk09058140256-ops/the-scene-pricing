@@ -111,6 +111,18 @@ export function PriceCell({ entry, isCheapest, isLosingCell, onSave }: PriceCell
                 最安
               </span>
             )}
+            {entry.bookingUrl && (
+              <a
+                href={entry.bookingUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                onClick={(e) => e.stopPropagation()}
+                title="この日付・条件で予約ページを開く"
+                className="text-xs font-normal text-slate-400 no-underline hover:text-slate-600"
+              >
+                ↗
+              </a>
+            )}
           </div>
           {entry.discountValue > 0 ? (
             <div className="flex flex-wrap items-baseline gap-x-1.5 text-[11px] text-slate-400">
