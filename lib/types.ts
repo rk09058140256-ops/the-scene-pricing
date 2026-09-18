@@ -18,8 +18,8 @@ export interface PriceEntry {
   note?: string;
   /**
    * このチャネルの予約ページへの直URL（日付・部屋タイプ等が反映された状態）。
-   * Google Hotelsの「無料掲載枠」経由で取得できた場合のみ設定される。
-   * 広告クリック計測リンク（有料スポンサー枠）は再利用しないため、無い場合もある。
+   * Google Hotelsの無料掲載枠（pcurl）または広告クリック計測リンク（aclk）の
+   * いずれかから取得される。社内モニタリング用途のため両方とも許容している。
    */
   bookingUrl?: string;
 }

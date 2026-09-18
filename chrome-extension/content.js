@@ -118,22 +118,33 @@
   }
 
   /**
-   * 行（<a>）のリンク先から、安全に再利用できる予約ページの直URLだけを取り出す。
+   * 行（<a>）のリンク先から、予約ページへの直URLを取り出す。
    *
    * Google Hotelsのリンクには2種類ある:
-   *   - スポンサー枠: "/aclk?...&gclid=...&adurl" 形式（Google広告のクリック計測リダイレクト）
-   *   - 無料掲載枠:   "/travel/lodging/clk?pc=...&pcurl=<実URL>&s=...&ap=1" 形式
-   * 後者は pcurl パラメータに実際の予約ページURL（チェックイン日・部屋タイプ・価格まで
-   * クエリに含む）がそのまま入っている。前者（広告リンク）は、後から時間が経ってから
-   * 保存済みURLを再クリックすると広告クリックの計測が歪む可能性があるため、
-   * 意図的に取得・保存しない（該当チャネルは bookingUrl が null になる）。
+   *   - 広告掲載（Google Hotel Ads出稿チャネル）: "/aclk?...&gclid=...&adurl" 形式
+   *     （Google広告のクリック計測リダイレクト。"各予約サイトのプラン"のような
+   *     非スポンサー見出しの下に表示されていても、そのOTAが出稿している場合は
+   *     このリンク形式のままになる＝見出しの位置では判別できない）
+   *   - 無料掲載枠: "/travel/lodging/clk?pc=...&pcurl=<実URL>&s=...&ap=1" 形式
+   *     （pcurl パラメータに実際の予約ページURLがそのまま入っている）
+   * 本ツールは社内向けの価格モニタリング用途のため、両方とも取得・保存する。
+   * どちらも実際にクリックすればそのOTAの該当プランページに遷移する。
+   * 同一チャネルが両方の形式で重複して出る場合は、URLとして安定している
+   * 無料掲載枠（pcurl）側を優先する（呼び出し元のマージ処理で判定）。
    */
   function extractBookingUrl(row) {
     var href = row.getAttribute("href");
-    if (!href || href.indexOf("/travel/lodging/clk") !== 0) return null;
+    if (!href) return null;
     try {
       var full = new URL(href, location.origin);
-      return full.searchParams.get("pcurl");
+      if (full.pathname.indexOf("/travel/lodging/clk") === 0) {
+        var pcurl = full.searchParams.get("pcurl");
+        return pcurl ? { url: pcurl, isAd: false } : null;
+      }
+      if (full.pathname.indexOf("/aclk") === 0) {
+        return { url: full.href, isAd: true };
+      }
+      return null;
     } catch (e) {
       return null;
     }
@@ -207,7 +218,7 @@
 
     var planName = guessPlanName(row, channelName);
     var note = extractNote(rowText);
-    var bookingUrl = extractBookingUrl(row);
+    var bookingUrlInfo = extractBookingUrl(row);
 
     var discountYen = 0;
     if (displayPrice !== null && finalPrice !== null && displayPrice > finalPrice) {
@@ -222,16 +233,17 @@
       finalPrice: finalPrice,
       discountYen: discountYen,
       note: note,
-      bookingUrl: bookingUrl,
+      bookingUrl: bookingUrlInfo ? bookingUrlInfo.url : null,
+      bookingUrlIsAd: bookingUrlInfo ? bookingUrlInfo.isAd : null,
       rawText: rowText.slice(0, 280)
     };
   }
 
   var visibleCtas = findCtaButtons().filter(isVisible);
 
-  // 同じチャネル・プラン・価格の行が、スポンサー枠と無料掲載枠の両方に重複して
-  // 出ることがある。後勝ちではなく「まだ bookingUrl を持っていなければ補完する」形で
-  // マージし、どちらかの表示順に関わらず安全なURLを取りこぼさないようにする。
+  // 同じチャネル・プラン・価格の行が、広告枠と無料掲載枠の両方に重複して
+  // 出ることがある。bookingUrl が未設定なら補完し、既に広告リンク(isAd)を
+  // 持っている場合は無料掲載枠(pcurl)のURLが見つかり次第そちらに差し替える。
   var byKey = new Map();
   var order = [];
   visibleCtas.forEach(function (cta) {
@@ -242,8 +254,9 @@
     if (!existing) {
       byKey.set(dedupeKey, parsed);
       order.push(dedupeKey);
-    } else if (!existing.bookingUrl && parsed.bookingUrl) {
+    } else if (parsed.bookingUrl && (!existing.bookingUrl || (existing.bookingUrlIsAd && !parsed.bookingUrlIsAd))) {
       existing.bookingUrl = parsed.bookingUrl;
+      existing.bookingUrlIsAd = parsed.bookingUrlIsAd;
     }
   });
   var rows = order.map(function (key) {
