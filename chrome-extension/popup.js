@@ -95,9 +95,9 @@
     return { otaId: slugify(name), otaName: name, recognized: false };
   }
 
-  // ページ上にCTAが1件も見つからなかった（＝該当チャネルが1つも表示されていない）場合に、
-  // 「全チャネル満室」として記録する対象。対応チャネル（mapChannel が recognized: true を
-  // 返すもの）だけを対象にする。
+  // 満室判定の対象となる、対応4チャネル（mapChannel が recognized: true を返すもの）の
+  // otaId/表示名の一覧。ページ上にCTAが1件も無かった場合や、Booking.com等の未対応
+  // チャネルしか表示されていない場合に、この4チャネル分を満室として記録するために使う。
   function recognizedChannelsForSoldOut() {
     return [
       { otaId: "tripla", otaName: els.officialLabel.value.trim() || "TRIPLA（自社予約）" },
@@ -470,6 +470,15 @@
       cheapestFallbackOtaIds.push(otaId);
     });
 
+    // 対応4チャネル（TRIPLA/楽天/じゃらん/一休）のうち、ページ上にCTAが1件も無かった
+    // ものも満室として扱う。Booking.com等の未対応チャネルしか表示されていない場合、
+    // rows自体は0件ではないため上のループには一切現れず、そのままでは「未入力」に
+    // なってしまう（対応チャネルが売り切れているのに満室判定が漏れる）ことへの対応。
+    recognizedChannelsForSoldOut().forEach(function (c) {
+      if (groups[c.otaId]) return; // 既に選択済み or 満室判定済み
+      soldOut.push({ otaId: c.otaId, otaName: c.otaName });
+    });
+
     return {
       checked: checked,
       cheapestFallbackOtaIds: cheapestFallbackOtaIds,
@@ -509,37 +518,25 @@
     state.meta = result.meta;
     renderMeta(); // dateInput 等をこの時点で必ず更新する（rows が0件でも下の「満室」記録に必要なため）
 
-    // CTAが1件も見つからない＝ページは読めているが、このホテル自体がこの日程では
-    // 全チャネルとも空室が無い（全社満室）可能性が高いケース。ただし抽出パターンが
-    // 壊れている場合にも同じ結果になり得るため、警告つきで案内し、実際の画面確認を促す。
-    if (!result.rows || !result.rows.length) {
-      state.rows = [];
-      var soldOutAll = attachVerifyUrl(recognizedChannelsForSoldOut(), result.meta.url);
-      state.lastSelection = { cheapestFallbackOtaIds: [], keywordMatchedOtaIds: [], soldOut: soldOutAll };
-      els.tableBox.hidden = true;
-      els.addDayBox.hidden = false;
-      els.rawText.value = JSON.stringify(result, null, 2);
-      setStatus(
-        "価格データが1件も見つかりませんでした。全チャネル（" +
-          soldOutAll
-            .map(function (s) {
-              return s.otaName;
-            })
-            .join("、") +
-          "）を満室として記録できます。まれに抽出側の不具合でも同じ状態になるため、" +
-          "「月次リストに追加」する前に実際のGoogle Hotels画面をご確認ください。",
-        "error"
-      );
-      return state.lastSelection;
-    }
-
-    var selection = buildInitialSelection(result.rows);
+    // buildInitialSelection は、対応4チャネル（TRIPLA/楽天/じゃらん/一休）のうち
+    // ページ上にCTAが1件も無かったものも満室として扱う。そのため rows が0件
+    // （Google Hotels自体に価格行が1件も無い）場合はもちろん、Booking.com等の
+    // 未対応チャネルしか表示されていない場合（rows>0だが対応4チャネルは0件）も
+    // 同じ経路で正しく満室判定される。
+    var rows = result.rows || [];
+    var selection = buildInitialSelection(rows);
     selection.soldOut = attachVerifyUrl(selection.soldOut, result.meta.url);
     state.lastSelection = selection;
-    state.rows = result.rows.map(function (data, idx) {
+    state.rows = rows.map(function (data, idx) {
       return { data: data, checked: selection.checked[idx] };
     });
-    renderTable();
+
+    if (state.rows.length) {
+      renderTable();
+    } else {
+      els.tableBox.hidden = true;
+      els.addDayBox.hidden = false;
+    }
     els.rawText.value = JSON.stringify(result, null, 2);
 
     var msg = state.rows.length + "件を取得しました。";
@@ -555,8 +552,13 @@
           })
           .join("、") +
         "（対象プランに一致する空室が見つかりませんでした。月次リストには「満室」として記録されます）";
+      if (!rows.length) {
+        msg +=
+          " ページ上に価格行が1件も見つからなかったため、まれに抽出側の不具合でも同じ状態になり得ます。" +
+          "「月次リストに追加」する前に実際のGoogle Hotels画面もあわせてご確認ください。";
+      }
     }
-    var hasWarning = Boolean(selection.cheapestFallbackOtaIds.length);
+    var hasWarning = Boolean(selection.cheapestFallbackOtaIds.length || (!rows.length && selection.soldOut.length));
     if (selection.cheapestFallbackOtaIds.length) {
       msg +=
         " 複数プランが検出され最安値を自動選択したチャネル: " +
