@@ -23,6 +23,8 @@
     <p class="combo-hint">
       「次の日へ進める」→「取得」→「月次リストに追加」を1回のクリックでまとめて実行します（自動ループではなく、押した回数だけ進みます）。
       同じチャネルに複数プランがある場合、まず「対象プランの必須/除外キーワード」（下の設定欄）に一致する行を選び、次に前回チェックしたプラン名の記憶、最後にそのチャネル内の最安値の順で自動選択します。未追加のまま止まることはありません（違うプランを比較したい場合は上のテーブルでチェックし直してください）。
+      <strong>ショートカット: 入力欄以外にフォーカスがある状態で Enter または Space キーを押すと、このボタンと同じ処理を実行します。</strong>
+      処理中は多重実行を防ぐためボタンが一時的に無効化されます（連打しても安全です）。
     </p>
   </section>
 
@@ -107,6 +109,7 @@
       <span id="monthlyCount" class="row-count">月次リスト: 0日分</span>
       <button id="clearMonthlyBtn" class="btn-link">全クリア</button>
     </div>
+    <p id="monthlyProgress" class="monthly-progress"></p>
     <div class="table-scroll monthly-scroll">
       <table id="monthlyTable">
         <thead>

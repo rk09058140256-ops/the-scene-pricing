@@ -6,7 +6,8 @@
     meta: null,
     rows: [], // { data: <row from content.js>, checked: boolean } — 現在のページの検出結果
     collected: {}, // { "YYYY-MM-DD": { hotelName, capturedAt, rows: [<row data>...] } } — 月次で蓄積した分
-    planMemory: {} // { otaId: planName } — 同一チャネルに複数プランがある場合に前回選んだプランを覚えておく
+    planMemory: {}, // { otaId: planName } — 同一チャネルに複数プランがある場合に前回選んだプランを覚えておく
+    comboBusy: false // 「次の日へ進めて取得・追加」処理中は true。連打による多重実行を防ぐ
   };
 
   var els = {
@@ -29,6 +30,7 @@
     rawBox: document.getElementById("rawBox"),
     rawText: document.getElementById("rawText"),
     monthlyCount: document.getElementById("monthlyCount"),
+    monthlyProgress: document.getElementById("monthlyProgress"),
     monthlyBody: document.getElementById("monthlyBody"),
     clearMonthlyBtn: document.getElementById("clearMonthlyBtn"),
     includeUnmapped: document.getElementById("includeUnmapped"),
@@ -534,19 +536,34 @@
   // 「次の日へ進めて取得・追加」: advance-day.js → content.js → 月次リストへの追加、を
   // このボタン1クリックの中で順番に実行する。複数日を勝手にループする機能ではなく、
   // 押した回数（＝1日分）だけこの3ステップをまとめて行うショートカット。
-  els.advanceExtractAddBtn.addEventListener("click", function () {
+  //
+  // state.comboBusy は、この処理が完了する前に同じ操作が二重に走らないようにするための
+  // ガード。キーボードショートカット（Enter/Space）で連打したときに、前回の
+  // chrome.scripting.executeScript が終わる前に次のリクエストが割り込んで日付がズレる、
+  // といった事故を防ぐ。
+  function finishCombo(msg, tone) {
+    state.comboBusy = false;
+    els.advanceExtractAddBtn.disabled = false;
+    setStatus(msg, tone);
+  }
+
+  function runAdvanceExtractAdd() {
+    if (state.comboBusy) return;
+    state.comboBusy = true;
+    els.advanceExtractAddBtn.disabled = true;
+
     setStatus("日付を進めています...");
     withGoogleHotelsTab(function (tab) {
       chrome.scripting.executeScript(
         { target: { tabId: tab.id }, files: ["advance-day.js"] },
         function (advResults) {
           if (chrome.runtime.lastError) {
-            setStatus("日付の切り替えに失敗しました: " + chrome.runtime.lastError.message, "error");
+            finishCombo("日付の切り替えに失敗しました: " + chrome.runtime.lastError.message, "error");
             return;
           }
           var advResult = advResults && advResults[0] && advResults[0].result;
           if (!advResult || !advResult.ok) {
-            setStatus((advResult && advResult.error) || "日付を進められませんでした。", "error");
+            finishCombo((advResult && advResult.error) || "日付を進められませんでした。", "error");
             return;
           }
           var staleWarning = advResult.priceMayBeStale
@@ -558,12 +575,12 @@
             { target: { tabId: tab.id }, files: ["content.js"] },
             function (extResults) {
               if (chrome.runtime.lastError) {
-                setStatus("抽出に失敗しました: " + chrome.runtime.lastError.message, "error");
+                finishCombo("抽出に失敗しました: " + chrome.runtime.lastError.message, "error");
                 return;
               }
               var extResult = extResults && extResults[0] && extResults[0].result;
               if (!extResult || !extResult.rows || !extResult.rows.length) {
-                setStatus(
+                finishCombo(
                   "日付は " + advResult.after.checkIn + " まで進めましたが、価格データが見つかりませんでした。",
                   "error"
                 );
@@ -574,7 +591,7 @@
               var addResult = addCurrentSelectionToMonthlyList();
 
               if (!addResult.ok) {
-                setStatus(
+                finishCombo(
                   advResult.after.checkIn + " の価格は取得できましたが、月次リストへの追加に失敗しました: " + addResult.error,
                   "error"
                 );
@@ -594,12 +611,28 @@
               if (staleWarning) addedMsg += staleWarning;
 
               var hasWarning = Boolean(selection.cheapestFallbackOtaIds.length || staleWarning);
-              setStatus(addedMsg, hasWarning ? "error" : "ok");
+              finishCombo(addedMsg, hasWarning ? "error" : "ok");
             }
           );
         }
       );
     });
+  }
+
+  els.advanceExtractAddBtn.addEventListener("click", runAdvanceExtractAdd);
+
+  // キーボードショートカット: Enter または Space で「次の日へ進めて取得・追加」を実行する。
+  // マウスを使わずキー連打でテンポよく進められるようにするため。
+  // テキスト入力欄・セレクト・チェックボックス等にフォーカスがある間は、通常の入力
+  // （Enterでの送信やSpaceでの入力）を妨げないよう対象外にする。
+  document.addEventListener("keydown", function (e) {
+    if (e.key !== "Enter" && e.key !== " ") return;
+    var target = e.target;
+    var tag = target && target.tagName;
+    if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT") return;
+    if (target && target.isContentEditable) return;
+    e.preventDefault();
+    runAdvanceExtractAdd();
   });
 
   // ---------- 月次リスト（蓄積） ----------
@@ -608,9 +641,43 @@
     chrome.storage.local.set({ collected: state.collected });
   }
 
+  // dateInput（現在Google Hotels側に表示されている日付）が属する月を基準に、
+  // その月のうち何日分がまだ月次リストに無いかを数える。「連打しすぎ」の防止用。
+  function renderProgress(dates) {
+    if (!els.monthlyProgress) return;
+    var refIso = els.dateInput.value;
+    var monthKey = refIso && /^\d{4}-\d{2}-\d{2}$/.test(refIso) ? refIso.slice(0, 7) : null;
+
+    if (!monthKey) {
+      els.monthlyProgress.textContent = "";
+      return;
+    }
+
+    var year = Number(monthKey.slice(0, 4));
+    var month = Number(monthKey.slice(5, 7));
+    var totalDaysInMonth = new Date(year, month, 0).getDate();
+    var collectedInMonth = dates.filter(function (d) {
+      return d.indexOf(monthKey) === 0;
+    }).length;
+    var remaining = Math.max(0, totalDaysInMonth - collectedInMonth);
+    var lastDate = dates.length ? dates[dates.length - 1] : null;
+
+    els.monthlyProgress.textContent =
+      monthKey +
+      "分の未取得: あと" +
+      remaining +
+      "日（" +
+      collectedInMonth +
+      "/" +
+      totalDaysInMonth +
+      "日 取得済み）／最終取得日: " +
+      (lastDate || "-");
+  }
+
   function renderMonthly() {
     var dates = Object.keys(state.collected).sort();
     els.monthlyCount.textContent = "月次リスト: " + dates.length + "日分";
+    renderProgress(dates);
     els.monthlyBody.innerHTML = "";
 
     if (dates.length === 0) {

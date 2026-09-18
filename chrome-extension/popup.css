@@ -92,6 +92,11 @@ header .sub {
 .btn:hover {
   background: #f0f2f0;
 }
+.btn:disabled {
+  opacity: 0.6;
+  cursor: default;
+  pointer-events: none;
+}
 .btn-primary {
   background: var(--accent);
   border-color: var(--accent);
@@ -169,6 +174,11 @@ header .sub {
   font-size: 10.5px;
   color: var(--text-faint);
   text-align: right;
+}
+.monthly-progress {
+  margin: 0 0 8px;
+  font-size: 10.5px;
+  color: var(--text-faint);
 }
 .table-scroll {
   max-height: 220px;
