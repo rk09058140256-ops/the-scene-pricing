@@ -111,18 +111,6 @@ export function PriceCell({ entry, isCheapest, isLosingCell, onSave }: PriceCell
                 最安
               </span>
             )}
-            {entry.bookingUrl && (
-              <a
-                href={entry.bookingUrl}
-                target="_blank"
-                rel="noopener noreferrer"
-                onClick={(e) => e.stopPropagation()}
-                title="この日付・条件で予約ページを開く"
-                className="text-xs font-normal text-slate-400 no-underline hover:text-slate-600"
-              >
-                ↗
-              </a>
-            )}
           </div>
           {entry.discountValue > 0 ? (
             <div className="flex flex-wrap items-baseline gap-x-1.5 text-[11px] text-slate-400">
@@ -136,6 +124,18 @@ export function PriceCell({ entry, isCheapest, isLosingCell, onSave }: PriceCell
             </div>
           ) : (
             <div className="text-[11px] text-slate-400">表示 {formatYen(entry.price)}</div>
+          )}
+          {entry.bookingUrl && (
+            <a
+              href={entry.bookingUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              onClick={(e) => e.stopPropagation()}
+              title="この日付・条件で予約ページを開く"
+              className="mt-0.5 inline-flex w-fit items-center gap-1 rounded px-1.5 py-0.5 text-xs font-medium text-slate-600 no-underline ring-1 ring-inset ring-slate-300 transition-colors hover:bg-slate-900 hover:text-white hover:ring-slate-900"
+            >
+              予約サイトへ 🛒
+            </a>
           )}
         </div>
       ) : (
