@@ -95,6 +95,18 @@
     return { otaId: slugify(name), otaName: name, recognized: false };
   }
 
+  // ページ上にCTAが1件も見つからなかった（＝該当チャネルが1つも表示されていない）場合に、
+  // 「全チャネル満室」として記録する対象。対応チャネル（mapChannel が recognized: true を
+  // 返すもの）だけを対象にする。
+  function recognizedChannelsForSoldOut() {
+    return [
+      { otaId: "tripla", otaName: els.officialLabel.value.trim() || "TRIPLA（自社予約）" },
+      { otaId: "rakuten", otaName: "楽天トラベル" },
+      { otaId: "jalan", otaName: "じゃらん" },
+      { otaId: "ikyu", otaName: "一休.com" }
+    ];
+  }
+
   function yen(v) {
     if (v === null || v === undefined) return "-";
     return "¥" + Number(v).toLocaleString("ja-JP");
@@ -467,7 +479,9 @@
   }
 
   function handleExtractResult(result) {
-    if (!result || !result.rows || !result.rows.length) {
+    // meta（チェックイン/チェックアウト等）すら取れない＝ページ構造自体を読み取れていない、
+    // 本当の抽出失敗。この場合のみ「満室」扱いにはせず、従来通りエラー表示で止める。
+    if (!result || !result.meta) {
       setStatus(
         "価格データが見つかりませんでした。Google Hotelsの「料金」タブが開いているか確認してください。",
         "error"
@@ -478,13 +492,39 @@
       state.lastSelection = { cheapestFallbackOtaIds: [], keywordMatchedOtaIds: [], soldOut: [] };
       return state.lastSelection;
     }
+
     state.meta = result.meta;
+    renderMeta(); // dateInput 等をこの時点で必ず更新する（rows が0件でも下の「満室」記録に必要なため）
+
+    // CTAが1件も見つからない＝ページは読めているが、このホテル自体がこの日程では
+    // 全チャネルとも空室が無い（全社満室）可能性が高いケース。ただし抽出パターンが
+    // 壊れている場合にも同じ結果になり得るため、警告つきで案内し、実際の画面確認を促す。
+    if (!result.rows || !result.rows.length) {
+      state.rows = [];
+      var soldOutAll = recognizedChannelsForSoldOut();
+      state.lastSelection = { cheapestFallbackOtaIds: [], keywordMatchedOtaIds: [], soldOut: soldOutAll };
+      els.tableBox.hidden = true;
+      els.addDayBox.hidden = false;
+      els.rawText.value = JSON.stringify(result, null, 2);
+      setStatus(
+        "価格データが1件も見つかりませんでした。全チャネル（" +
+          soldOutAll
+            .map(function (s) {
+              return s.otaName;
+            })
+            .join("、") +
+          "）を満室として記録できます。まれに抽出側の不具合でも同じ状態になるため、" +
+          "「月次リストに追加」する前に実際のGoogle Hotels画面をご確認ください。",
+        "error"
+      );
+      return state.lastSelection;
+    }
+
     var selection = buildInitialSelection(result.rows);
     state.lastSelection = selection;
     state.rows = result.rows.map(function (data, idx) {
       return { data: data, checked: selection.checked[idx] };
     });
-    renderMeta();
     renderTable();
     els.rawText.value = JSON.stringify(result, null, 2);
 
@@ -637,9 +677,9 @@
                 return;
               }
               var extResult = extResults && extResults[0] && extResults[0].result;
-              if (!extResult || !extResult.rows || !extResult.rows.length) {
+              if (!extResult || !extResult.meta) {
                 finishCombo(
-                  "日付は " + advResult.after.checkIn + " まで進めましたが、価格データが見つかりませんでした。",
+                  "日付は " + advResult.after.checkIn + " まで進めましたが、価格データの取得に失敗しました。",
                   "error"
                 );
                 return;
@@ -659,6 +699,9 @@
               var addedMsg = addResult.dateIso + " を追加しました（" + addResult.count + "件";
               if (addResult.soldOutCount) addedMsg += "、満室" + addResult.soldOutCount + "件";
               addedMsg += "）。";
+              if (!extResult.rows || !extResult.rows.length) {
+                addedMsg += " 価格データが1件も見つからなかったため、全チャネルを満室として記録しました。抽出側の不具合の可能性もあるため、実際の画面をご確認ください。";
+              }
               if (selection.keywordMatchedOtaIds.length) {
                 addedMsg += " キーワード一致: " + selection.keywordMatchedOtaIds.join("、") + "。";
               }
@@ -670,7 +713,9 @@
               }
               if (staleWarning) addedMsg += staleWarning;
 
-              var hasWarning = Boolean(selection.cheapestFallbackOtaIds.length || staleWarning);
+              var hasWarning = Boolean(
+                selection.cheapestFallbackOtaIds.length || staleWarning || !extResult.rows || !extResult.rows.length
+              );
               finishCombo(addedMsg, hasWarning ? "error" : "ok");
             }
           );
