@@ -82,12 +82,14 @@ export async function POST(request: NextRequest) {
 
       const isFull = typeof row.status === "string" && row.status.trim().toUpperCase() === "FULL";
       if (isFull) {
+        const fullBookingUrl = sanitizeBookingUrl(row.bookingUrl);
         prices[otaId] = {
           price: 0,
           discountType: "fixed",
           discountValue: 0,
           status: "full",
-          ...(row.note ? { note: row.note } : {})
+          ...(row.note ? { note: row.note } : {}),
+          ...(fullBookingUrl ? { bookingUrl: fullBookingUrl } : {})
         };
         if (row.otaName) otaNames[otaId] = row.otaName;
         continue;

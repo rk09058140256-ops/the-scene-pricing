@@ -152,10 +152,23 @@
   // 「満室」判定されたチャネルをWebアプリ/CSV向けの行に変換する。
   // buildInitialSelection は対応チャネル（tripla/楽天/じゃらん/一休）にしか満室判定を
   // 行わないため、ここでの追加フィルタは不要。価格情報を持たないため、data.displayPrice
-  // 等は含めず status: "FULL" のみで表現する。
+  // 等は含めず status: "FULL" のみで表現する。bookingUrl があれば引き継ぐ
+  // （満室セルから「本当に空室が無いか」を実画面で確認できるようにするため）。
   function toApiSoldOutRows(soldOutList) {
     return (soldOutList || []).map(function (s) {
-      return { otaId: s.otaId, otaName: s.otaName, status: "FULL" };
+      var row = { otaId: s.otaId, otaName: s.otaName, status: "FULL" };
+      if (s.bookingUrl) row.bookingUrl = s.bookingUrl;
+      return row;
+    });
+  }
+
+  // soldOut配列の各エントリに、抽出時点のGoogle Hotels画面URL（日程選択状態を含む）を
+  // bookingUrl として付与する。満室と判定されたチャネルには個別のOTA直リンクが存在しない
+  // ため、代わりにこのURLを使って「その日のGoogle Hotels比較画面」を開けるようにする。
+  function attachVerifyUrl(soldOutList, url) {
+    if (!url) return soldOutList;
+    return soldOutList.map(function (s) {
+      return { otaId: s.otaId, otaName: s.otaName, bookingUrl: url };
     });
   }
 
@@ -501,7 +514,7 @@
     // 壊れている場合にも同じ結果になり得るため、警告つきで案内し、実際の画面確認を促す。
     if (!result.rows || !result.rows.length) {
       state.rows = [];
-      var soldOutAll = recognizedChannelsForSoldOut();
+      var soldOutAll = attachVerifyUrl(recognizedChannelsForSoldOut(), result.meta.url);
       state.lastSelection = { cheapestFallbackOtaIds: [], keywordMatchedOtaIds: [], soldOut: soldOutAll };
       els.tableBox.hidden = true;
       els.addDayBox.hidden = false;
@@ -521,6 +534,7 @@
     }
 
     var selection = buildInitialSelection(result.rows);
+    selection.soldOut = attachVerifyUrl(selection.soldOut, result.meta.url);
     state.lastSelection = selection;
     state.rows = result.rows.map(function (data, idx) {
       return { data: data, checked: selection.checked[idx] };
@@ -926,7 +940,7 @@
         })
         .filter(Boolean);
       (entry.soldOut || []).forEach(function (s) {
-        rows.push({ otaId: s.otaId, otaName: s.otaName, status: "FULL" });
+        rows.push({ otaId: s.otaId, otaName: s.otaName, status: "FULL", bookingUrl: s.bookingUrl || undefined });
       });
       return { date: dateIso, hotelName: entry.hotelName, rows: rows };
     });

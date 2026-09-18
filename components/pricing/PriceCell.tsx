@@ -45,6 +45,25 @@ export function PriceCell({ entry, isCheapest, isLosingCell, onSave }: PriceCell
 
   const effective = calcEffectivePrice(entry);
 
+  // 満室セルの bookingUrl は個別OTAの直リンクではなく、抽出時点のGoogle Hotels比較画面
+  // （その日程が選択された状態）のURL。文言を分けて誤解を防ぐ。
+  const bookingLink = entry?.bookingUrl && (
+    <a
+      href={entry.bookingUrl}
+      target="_blank"
+      rel="noopener noreferrer"
+      onClick={(e) => e.stopPropagation()}
+      title={
+        entry.status === "full"
+          ? "Google Hotelsでこの日付の空室状況を確認する"
+          : "この日付・条件で予約ページを開く"
+      }
+      className="mt-0.5 inline-flex w-fit items-center gap-1 rounded px-1.5 py-0.5 text-xs font-medium text-slate-600 no-underline ring-1 ring-inset ring-slate-300 transition-colors hover:bg-slate-900 hover:text-white hover:ring-slate-900"
+    >
+      予約サイトへ 🛒
+    </a>
+  );
+
   if (editing) {
     return (
       <td className="border border-slate-200 bg-white p-2 align-top">
@@ -122,6 +141,7 @@ export function PriceCell({ entry, isCheapest, isLosingCell, onSave }: PriceCell
             満室
           </span>
           <span className="text-[11px] text-slate-400">空室なし（クリックで編集）</span>
+          {bookingLink}
         </div>
       ) : (
         <div className="flex flex-col gap-0.5">
@@ -151,18 +171,7 @@ export function PriceCell({ entry, isCheapest, isLosingCell, onSave }: PriceCell
           ) : (
             <div className="text-[11px] text-slate-400">表示 {formatYen(entry.price)}</div>
           )}
-          {entry.bookingUrl && (
-            <a
-              href={entry.bookingUrl}
-              target="_blank"
-              rel="noopener noreferrer"
-              onClick={(e) => e.stopPropagation()}
-              title="この日付・条件で予約ページを開く"
-              className="mt-0.5 inline-flex w-fit items-center gap-1 rounded px-1.5 py-0.5 text-xs font-medium text-slate-600 no-underline ring-1 ring-inset ring-slate-300 transition-colors hover:bg-slate-900 hover:text-white hover:ring-slate-900"
-            >
-              予約サイトへ 🛒
-            </a>
-          )}
+          {bookingLink}
         </div>
       ) : (
         <span className="text-xs text-slate-300">未入力（クリックで入力）</span>
